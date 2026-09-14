@@ -392,11 +392,11 @@ tiers:
   # runs demonstrating the exponent's sign, and its wiring point is already carried by arm3's dense
   # write level.
   "presence_decay16":
-    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1-mass, decay: {source: learned},
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1-mass, decay: {type: LearnedDecay},
        conditions: [presence-k16]}
-    - {build: routed, instance: rola-arm2-union, tag: arm2-mass, decay: {source: learned},
+    - {build: routed, instance: rola-arm2-union, tag: arm2-mass, decay: {type: LearnedDecay},
        conditions: [presence-k16]}
-    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3-mass, decay: {source: learned},
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3-mass, decay: {type: LearnedDecay},
        conditions: [presence-k16]}
 fleet:
   env: {GRID_TIERS: "presence16"}        # LOCAL grid; this block only records the default tier

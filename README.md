@@ -35,14 +35,16 @@ docker/                 the fleet images
 
 ## The RoLA arms (`rola_bench/models/rola.py`)
 
-A **wiring** names each routing level's duties, outermost first: read and write density (`dense` or `sparse`),
-whether the duties share a projection (`tied`), and a sparse duty's entmax order (`alpha`). A **cell** is a wiring at a
-state count N per head, with every level's width (the uniform factorization b**D = N unless widths are given), a decay
-source (`None`, or `{source: constant | learned, ...}`) and the router pins. The canonical MQAR slate is
-`rola-arm1-densread-sparsewrite`, `rola-arm2-union`, `rola-arm3-levelsplit` and the one-level control `rola-d1-dense`.
+A **wiring** is one of rola's own level spellings per routing level, outermost first (`rola.dense_routing`,
+`rola.split_routing`, `rola.union_routing`, `rola.tied_routing`). A **cell** is a wiring at a state count N per head:
+every level's width (the uniform factorization b**D = N unless widths are given), its levels as rola builds them, a
+decay source as rola's JSON (`None`, or `{"type": "LearnedDecay", ...}`) and the route projection's `bias`. The
+canonical MQAR slate is `rola-arm1-densread-sparsewrite`, `rola-arm2-union`, `rola-arm3-levelsplit` and the one-level
+control `rola-d1-dense`.
 
-Every bench builds a cell one way: `mixer_config` for zoology, `layer` for a bare fla layer, or `config_kwargs`
-for `RoLAConfig`. It reads a built cell's state back off the layer (`state_floats`), never from a formula. Whatever
+Every bench builds a cell one way: `mixer_config` for zoology, or `layer` for a bare fla layer, both passing rola's
+objects as their JSON (`fla.layers.rola.encode`). It reads a built cell's state back off the layer (`state_floats`),
+never from a formula. Whatever
 rola refuses, every build refuses with rola's own error. Today that is prefill while its kernel is rebuilt and
 training before its native backward, so every RoLA arm of every bench fails until rola builds those passes. The
 baseline arms run.

@@ -44,7 +44,8 @@ Spec schema (see experiments/*.yaml):
   tiers: {"<id>": [arm, ...]} # selected by the GRID_TIERS env (default all)
   arm kinds:
     {build: routed, instance, tag, n_heads?, d_v?, states_per_level?, decay?, router_bias?, lrs?, ncs?,
-     seq_lens?, conditions?, run_id?}      # instance: a wiring; decay: null or a rola decay source dict
+     seq_lens?, conditions?, run_id?}      # instance: a wiring; decay: null or a rola decay source as JSON
+                                           # ({type: LearnedDecay, ...}); router_bias: the route projection's bias
         run_id template vars: {tag} {nc} {st} {lr:.0e} {seed} {d_model} {L} {alpha_cap} {cond}
         default: "grid-routed-{tag}-nc{nc}_L{L}_st{st}_lr{lr:.0e}_s{seed}"
     {build: baselines, methods: [..], shapes: [..]}
@@ -282,7 +283,7 @@ def build_configs(spec):
                 for nc in a_ncs:
                     try:
                         cell = cells.cell(arm["instance"], nc, widths=arm.get("states_per_level"),
-                                          decay=arm.get("decay"), router_bias=arm.get("router_bias", True))
+                                          decay=arm.get("decay"), bias=arm.get("router_bias", True))
                     except cells.NoSpelling as e:
                         # Structural, not a failure: a D=2 wiring has no spelling at N=2. Reported
                         # exactly like a baseline's kernel ceiling — an omitted cell with a reason.

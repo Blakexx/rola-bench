@@ -89,8 +89,8 @@
 #   TIME-PROXY clock alongside the write-mass one, and this cell is exactly what separates them (a
 #   time clock erodes the long-lived items, a write-mass clock does not). rola's decay slot feeds a
 #   write-conditioned clock only (`rola/routing/decay.py`: a source that decayed on time "would be a
-#   different recurrence, and it is vetoed as one"), and fla's decay sources are `constant` and
-#   `learned`, both rates on that clock. So the cell is built and run at the rungs that exist, and the
+#   different recurrence, and it is vetoed as one"), and its decay sources are `ConstantDecay` and
+#   `LearnedDecay`, both rates on that clock. So the cell is built and run at the rungs that exist, and the
 #   comparison it was designed for has no spelling. Not substituted, not silently dropped.
 #
 # PREDICTED-5 (the natural-distribution proxy). `reuse` (pool 512, Zipf a = 1.5, k = 16 per
@@ -281,13 +281,13 @@ tiers:
   # so the arm tag is the only thing that differs in the run_id. The third rung (a time clock) has no
   # V3 spelling — see PREDICTED-4.
   "decay":
-    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1-mass, decay: {source: learned},
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1-mass, decay: {type: LearnedDecay},
        conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
-    - {build: routed, instance: rola-arm2-union, tag: arm2-mass, decay: {source: learned},
+    - {build: routed, instance: rola-arm2-union, tag: arm2-mass, decay: {type: LearnedDecay},
        conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
-    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3-mass, decay: {source: learned},
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3-mass, decay: {type: LearnedDecay},
        conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
-    - {build: routed, instance: rola-d1-dense, tag: d1-mass, decay: {source: learned},
+    - {build: routed, instance: rola-d1-dense, tag: d1-mass, decay: {type: LearnedDecay},
        conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
   # T5 — THE NATURAL-DISTRIBUTION PROXY. The ladder brackets the MEASURED demand (~125), not the
   # item count (16) — which is the whole prediction.

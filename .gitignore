@@ -12,4 +12,3 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 # external LM harness (on shelf) — kept locally, add as submodule when LM goes live
-rola_bench/lm/flame/

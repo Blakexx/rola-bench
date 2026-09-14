@@ -17,7 +17,7 @@ def main() -> int:
         print("VERIFY FAILED: no CUDA device")
         return 1
     torch.manual_seed(0)
-    layer = cells.layer(cells.cell("rola-d1-dense", 4), hidden_size=64, num_heads=1, head_v_dim=64).cuda()
+    layer = cells.layer(cells.cell("rola-d1-dense", 4), hidden_size=64, num_heads=1, d_v=64).cuda()
     x = torch.randn(2, 64, 64, device="cuda", requires_grad=True)
     try:
         out = layer(x)[0]

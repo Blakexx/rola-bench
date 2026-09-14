@@ -34,19 +34,19 @@ def test_slate_is_the_three_wirings_plus_the_d1_control():
                                        "rola-d1-dense")
     assert set(cells.WIRINGS) - set(cells.CANONICAL_WIRINGS) == {
         "rola-arm3-levelsplit-a2w",                  # the alpha axis
-        "rola-arm1-tied", "rola-d1-dense-tied",      # the coupling-independence pair
+        "rola-d1-dense-tied",                        # one tied softmax level against rola-d1-dense
         "rola-hybrid", "rola-hybrid-tiedtop",        # the depth hybrid and its tied-top ablation
     }
 
 
 @pytest.mark.parametrize("wiring", ["rola-arm1-densread-sparsewrite", "rola-arm2-union", "rola-arm3-levelsplit",
-                                    "rola-arm3-levelsplit-a2w", "rola-d1-dense", "rola-arm1-tied", "rola-d1-dense-tied",
+                                    "rola-arm3-levelsplit-a2w", "rola-d1-dense", "rola-d1-dense-tied",
                                     "rola-hybrid", "rola-hybrid-tiedtop"])
 def test_every_wiring_constructs(wiring):
     from rola_bench.mqar import MQAR_GEOM
 
     mixer = _mixer(wiring)
-    assert mixer.layer.topology.N == _N and mixer.layer.head_v_dim == MQAR_GEOM["d_v"]
+    assert mixer.layer.topology.N == _N and mixer.layer.d_v == MQAR_GEOM["d_v"]
 
 
 @pytest.mark.parametrize("wiring", ["rola-arm1-densread-sparsewrite", "rola-arm2-union", "rola-arm3-levelsplit",
@@ -89,11 +89,14 @@ def test_d1_dense_control_is_a_single_dense_level():
 
 
 def test_a2w_variant_differs_from_arm3_in_alpha_alone():
+    import rola
+
     from rola_bench.models import rola as cells
 
-    base, a2w = cells.WIRINGS["rola-arm3-levelsplit"], cells.WIRINGS["rola-arm3-levelsplit-a2w"]
-    assert [(r["tied"], r["read"], r["write"]) for r in base] == [(r["tied"], r["read"], r["write"]) for r in a2w]
-    assert [r.get("alpha") for r in a2w] == [2.0, 1.5]      # sparsemax on the sparse write, entmax-1.5 on the read
+    base, a2w = cells.cell("rola-arm3-levelsplit", 64).levels, cells.cell("rola-arm3-levelsplit-a2w", 64).levels
+    assert a2w[0] == rola.IndependentRouting(width=8, read=rola.softmax(), write=rola.entmax(2.0))  # sparsemax write
+    assert a2w[1] == base[1]                                                                        # entmax-1.5 read
+    assert base[0] == rola.IndependentRouting(width=8, read=rola.softmax(), write=rola.entmax(1.5))
 
 
 def test_a_wiring_without_a_uniform_spelling_is_refused_by_name():
