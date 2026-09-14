@@ -22,7 +22,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from rola_results import ROOT, Store, key
+from rola_results import ROOT, Store, key, portable
+
+#: this checkout, which a stored traceback's paths are made relative to
+CHECKOUT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -135,8 +138,8 @@ def run(nodes: list[Node], root: Path = ROOT, *, repeat: bool = False, force: bo
                     raise RuntimeError("the action wrote no output")
             except (Exception, SystemExit) as ex:
                 wall = time.time() - started
-                store.put(semantics, error=f"{type(ex).__name__}: {ex}", wall_s=wall, provenance=node.meta,
-                          trace=traceback.format_exc()[-3000:])
+                store.put(semantics, error=portable(f"{type(ex).__name__}: {ex}", CHECKOUT), wall_s=wall,
+                          provenance=node.meta, trace=portable(traceback.format_exc()[-3000:], CHECKOUT))
                 outcomes.append(Outcome(node.name, k, "failed", wall, ok, str(ex)[-300:]))
                 log(f"FAILED    {node.name} [{k[:12]}] {wall:.1f}s: {str(ex)[-200:]}")
                 continue
