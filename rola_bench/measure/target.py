@@ -157,7 +157,7 @@ def instrument(target: Target, args: list[str], dest: Path, timeout: int = 3600)
 @cache
 def cells(target: Target, kind: str) -> tuple[str, ...]:
     """The registry's cells of `kind` (carry or layer), as the target checkout defines them."""
-    code = ("import json, sys; sys.path.insert(0, 'benchmarks'); from bench.driver import CELLS; "
+    code = ("import json, sys; sys.path.insert(0, 'benchmarks'); from benchmarks.cells.registry import CELLS; "
             f"print(json.dumps(sorted(n for n, (k, _) in CELLS.items() if k == {kind!r})))")
     rc, out = sh([target.python, "-c", code], target.worktree, 600)
     if rc:
@@ -182,7 +182,7 @@ PRE_COUNT_BENCHES = {"prefill_op_chunked": ("prefill_op", 4)}
 _ROSTER = """
 import json, sys
 sys.path.insert(0, 'benchmarks')
-from bench.driver import CELLS
+from benchmarks.cells.registry import CELLS
 from bench.subjects import SUBJECTS, applicable
 counts = sorted({n for s in SUBJECTS.values() for n in getattr(s, 'calls', (1,))})
 roster = {}
