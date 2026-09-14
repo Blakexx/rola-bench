@@ -22,7 +22,8 @@ def main() -> int:
         p.add_argument("--target", required=True, help="worktree:PATH[,venv:PATH][,label:NAME][,schedule:first|DENSE/SPARSE]")
         p.add_argument("--reference", action="append", default=[], help="an arm timed against the target (repeatable)")
         p.add_argument("--modules", default="all", help="all, or a comma list of modules or prefixes (carry, timing.session)")
-        p.add_argument("--cells", default="all", help="all, gate, or a comma list of carry cells")
+        p.add_argument("--points", default="all", help="all, gate, or a comma list of points (registry.json)")
+        p.add_argument("--cells", default="all", help="all, or a comma list narrowing the points' rola cells")
         p.add_argument("--subjects", default="all", help="all, or a comma list of bench subjects")
         p.add_argument("--reps", type=int, default=11, help="odd: a round's median is one of its samples")
         p.add_argument("--warmup", type=int, default=10, help="at least the driver's floor of 10")
@@ -54,7 +55,7 @@ def main() -> int:
         return 0
 
     target = parse(a.target)
-    opt = Options([parse(r) for r in a.reference], a.cells, a.subjects, a.reps, a.warmup, a.rounds)
+    opt = Options([parse(r) for r in a.reference], a.points, a.cells, a.subjects, a.reps, a.warmup, a.rounds)
     nodes = nodes_for(target, opt, a.modules)
     outcomes = engine.run(nodes, dry=a.cmd == "plan", repeat=getattr(a, "repeat", False),
                           force=getattr(a, "force", False), log=lambda line: print(line, flush=True))

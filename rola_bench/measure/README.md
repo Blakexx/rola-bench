@@ -6,9 +6,9 @@ them, runs what is not already stored, and keeps every result through `rola_resu
 library and `rola_results` only: it runs from any rola venv or the dev container without fleet, zoology or transformers. Rented, citable runs stay on the fleet tier (`python -m rola_bench.fleet`, `rola_bench/perf/README.md`);
 this tier is the engineering gate.
 
-    python -m rola_bench.measure plan --target worktree:PATH --reference worktree:PATH,label:master,schedule:box/sparse-g32 --cells gate
-    python -m rola_bench.measure run  --target ... [--reference ...] [--modules carry,timing] [--cells all|gate|a,b]
-                                    [--subjects all|a,b] [--repeat] [--force]
+    python -m rola_bench.measure plan --target worktree:PATH --reference worktree:PATH,label:master,schedule:box/sparse-g32 --points gate
+    python -m rola_bench.measure run  --target ... [--reference ...] [--modules carry,timing] [--points all|gate|a,b]
+                                    [--cells all|a,b] [--subjects all|a,b] [--repeat] [--force]
     python -m rola_bench.measure show carry.phases
 
 ## Targets and arms
@@ -24,11 +24,26 @@ A timing run's arms are explicit. The `--target` is the `subject`, and each `--r
 same session: rola's `tools/compare.py`, run from the target, which drives rola-devtools' interleaving driver. Every
 rola arm is built by its own checkout's `bench.provider` under its own venv and named by its subject and dials
 (`carry_forward@schedule=identity`); every arm is warmed past the driver's floor of 10 launches, then called once per
-rep in a fresh random order, under the GPU lock and the clock lock. A carry subject's session also times the attention
-reference (`attention.py`: torch's forced flash backend at the cell's tokens and value width, one head), a foreign arm
-whose matching rule the session states. Latency is only comparable within one session, so the session records the
-point, the matching rule, every arm's cell and raw samples in the order taken, and the clock; the paired ratios it
-carries are to the target, within that session.
+rep in a fresh random order, under the GPU lock and the clock lock. A session is one point: every rola arm runs on each
+of the point's rola cells it accepts, and a carry subject's session also times the attention reference (`attention.py`:
+torch's forced flash backend) on the point's attention cell. Latency is only comparable within one session, so the
+session records the point with its cells and claim, every row's cell, what its runner built, raw samples in the order
+taken, and the clock; the paired ratios it carries are to the target's row on the same cell, within that session.
+
+## Points, cells and runners
+
+What a run measures is chosen by POINT (`registry.json`, read with rola-devtools' `rola_devtools.cells`). A cell is a
+data provider and its parameters: rola's cells are the target checkout's own registries (`benchmarks/cells`), and this
+file adds the attention reference's (`cells.py:qkv`: tokens, value width, heads, dtype). A point groups cells by runner
+-- `rola` (the checkout's `bench.provider`) and `attention` (`attention.py`) -- and states what it holds equal: every
+carry point holds the tokens and the value width and names the RoLA state count (`L1024-N65536-dv64`; capacity-fair where
+N = L), and every layer cell is a point of its own (`layer-<cell>`). `--points` selects points (`gate` is `GATE_POINTS`)
+and `--cells` narrows their rola cells.
+
+Before planning, the suite asks each rola checkout's runner what it makes of every selected rola cell (the driver's
+`accepts`): the arms it runs there, or a refusal by name -- a carry arm its binary does not carry, an iteration build
+lacking a shipped arm. Refusals are printed; the carry instruments take the target's accepted carry cells; a session
+takes the point's cells every rola arm accepts, one session per carry order when an arm's schedule splits the cells.
 
 A run with a reference ends with each timing unit's VERDICT, and `python -m rola_bench.measure verdict` prints it again
 from the store without running anything: rola-results' `verdict` query (the reference arm's recent sessions of the unit
@@ -74,13 +89,12 @@ delta between commits.
 | `carry.counters` | carry cell | `tools/pipe_counters.py` | the profiler's pipe and resource counters, launch totals |
 | `carry.census` | carry cell | `tools/stall_census.py` | stall samples by component and reason, phase and wavefront census |
 | `carry.timeline` | carry cell | `tools/pipe_timeline.py` | the pipes' PM-sampled series over one launch |
-| `timing.session` | subject @ cell [@ calls=N] | `tools/compare.py` | every arm's cell and raw samples in order, round medians, paired ratios to the target, clock |
+| `timing.session` | subject @ point [@ calls=N] | `tools/compare.py` | every row's cell and raw samples in order, round medians, paired ratios within each cell, clock |
 
-`--cells gate` is the kernel's first four gate cells (`GATE_CELLS`). Timing covers every subject of the target's bench
-roster, at every call count it declares (`bench.subjects.Subject.calls`: the sequence as N carried calls), on every cell
-`bench.subjects.applicable` admits for it; `--cells` narrows the carry cells, a layer subject takes every layer cell it
-applies to. Each arm runs the unit as its own checkout spells it (`target.Lane`): a reference from before the call count
-names a multi-call unit as a bench of its own (`PRE_COUNT_BENCHES`).
+`--points gate` is the kernel's gate points (`GATE_POINTS`: the N = L 64K point and the flagship point). Timing covers
+every subject the target's runner offers on a point's cells, at every call count (`bench.subjects.Subject.calls`: the
+sequence as N carried calls). A reference must be a checkout whose cells are data providers and whose `bench.provider` is
+a runner (rola from ce9eaf1 on).
 
 ## Tests
 

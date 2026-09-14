@@ -158,76 +158,32 @@ def instrument(target: Target, args: list[str], dest: Path, timeout: int = 3600)
         dest.write_text(out.read_text())
 
 
-#: THE CELLS A TARGET RUNS are rola's answer (`benchmarks.cells.registry.runnable`): its binary's arms decide them, and a
-#: binary without an arm its tree ships is refused before anything is planned.
-_REGISTRY = """
-import json, sys
-sys.path.insert(0, 'benchmarks')
-from benchmarks.cells.registry import CELLS, runnable
-try:
-    ran = runnable()
-except RuntimeError as refusal:
-    sys.exit(f'REFUSED: {refusal}')
-"""
+#: THE SUITE'S REGISTRY: the attention reference's cells and the points that group cells by runner (`rola_devtools.cells`)
+SUITE_REGISTRY = Path(__file__).with_name("registry.json")
 
 
 @cache
-def cells(target: Target, kind: str) -> tuple[str, ...]:
-    """The registry's cells of `kind` (carry or layer) the target runs; the carry cells it does not are named once."""
-    code = _REGISTRY + f"print(json.dumps({{**ran, 'cells': [n for n in ran['cells'] if CELLS[n][0] == {kind!r}]}}))"
-    rc, out = sh([target.python, "-c", code], target.worktree, 600)
-    refused = [line for line in out.splitlines() if line.startswith("REFUSED: ")]
-    if rc:
-        raise SystemExit(f"{target.label}: {refused[-1]}" if refused else f"{target.label}: could not read the cells it runs: "
-                         f"{out[-600:]}")
-    ran = json.loads(out.strip().splitlines()[-1])
-    if kind == "carry" and (ran["undeclared"] or ran["unbuilt"]):
-        print(f"{target.label}: the binary carries {[tuple(arm) for arm in ran['arms']]}; not run -- no arm in the tree: "
-              f"{', '.join(ran['undeclared']) or '-'}; a test arm this build left out: {', '.join(ran['unbuilt']) or '-'}",
-              flush=True)
-    return tuple(sorted(ran["cells"]))
+def registry(target: Target):
+    """The target checkout's cells (`benchmarks/cells`) with the suite's cells and points: what a run's points resolve to."""
+    from rola_devtools.cells import Registry
+
+    cells = target.worktree / "benchmarks" / "cells"
+    return Registry.load([cells / "carry_cells.json", cells / "layer_cells.json", SUITE_REGISTRY])
 
 
-@dataclass(frozen=True)
-class Lane:
-    """How one checkout spells a timing unit to its probe: its own bench name, the call count its worker takes, and the
-    cells `bench.subjects.applicable` admits there."""
+def rola_runner(target: Target, arm: str = ""):
+    """A checkout's rola runner as the driver runs it: its own `bench.provider` under its own venv, from its own tree."""
+    from rola_devtools.interleave import ArmSpec
 
-    bench: str
-    calls: int
-    cells: tuple[str, ...]
-
-
-#: A ROSTER FROM BEFORE ROLA'S CALL COUNT (`bench.subjects.Subject.calls`) names a multi-call unit as a bench of its own.
-#: An entry retires once no reference predates the count.
-PRE_COUNT_BENCHES = {"prefill_op_chunked": ("prefill_op", 4)}
-
-_ROSTER = _REGISTRY + """
-from bench.subjects import SUBJECTS, applicable
-counts = sorted({n for s in SUBJECTS.values() for n in getattr(s, 'calls', (1,))})
-roster = {}
-for cell in sorted(ran['cells']):
-    kind, spec = CELLS[cell]
-    for n in counts:
-        for name in applicable(spec, kind, *([n] if n != 1 else [])):
-            roster.setdefault(f'{name}@{n}', []).append(cell)
-print(json.dumps(roster))
-"""
+    return ArmSpec(target.label, "bench.provider:arms", arm, python=target.python, cwd=str(target.worktree),
+                   env={"PYTHONPATH": f"{target.worktree}:{target.worktree}/benchmarks"}, runner="rola")
 
 
 @cache
-def subjects(target: Target) -> dict[tuple[str, int], Lane]:
-    """The bench roster the target defines: each (subject, call count) unit with the lane that runs it there."""
-    rc, out = sh([target.python, "-c", _ROSTER], target.worktree, 600)
-    if rc:
-        raise SystemExit(f"{target.label}: could not read the bench roster: {out[-400:]}")
-    raw = json.loads(out.strip().splitlines()[-1])
-    lanes: dict[tuple[str, int], Lane] = {}
-    for key, admitted in raw.items():
-        bench, n = key.rsplit("@", 1)
-        if bench not in PRE_COUNT_BENCHES:
-            lanes[bench, int(n)] = Lane(bench, int(n), tuple(admitted))
-    for bench, unit in PRE_COUNT_BENCHES.items():
-        if f"{bench}@1" in raw:
-            lanes.setdefault(unit, Lane(bench, 1, tuple(raw[f"{bench}@1"])))
-    return lanes
+def accepted(target: Target, source: Target, names: tuple[str, ...]) -> dict[str, dict]:
+    """What `target`'s rola runner makes of the rola cells `names` as `source`'s registry defines them (a session sends
+    every arm the target's cells): `{name: {"arms": [...]}}`, or `{name: {"refused": why}}`."""
+    from rola_devtools.interleave import accepts
+
+    reg = registry(source)
+    return accepts(rola_runner(target), [reg.cell(name) for name in names])

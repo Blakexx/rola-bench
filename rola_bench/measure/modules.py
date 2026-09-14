@@ -12,7 +12,11 @@ with its declared role -- and ratios between arms are the reader's.
     carry.counters    the profiler's pipe and resource counters, one launch (per carry cell)
     carry.census      every stall sample by component, reason, source line (per carry cell)
     carry.timeline    the pipes over one launch, PM sampling               (per carry cell)
-    timing.session    every arm's interleaved launch times for a subject   (per subject x call count x cell it applies to)
+    timing.session    every arm's interleaved launch times for a subject   (per point x subject x call count)
+
+What runs is chosen by POINT (`registry.json`, `rola_devtools.cells`): a point groups cells by runner, the carry
+instruments take the rola cells of the selected points that the target's rola runner accepts, and a session times
+every arm on the point's cells the arm's runner accepts.
 """
 from __future__ import annotations
 
@@ -24,16 +28,18 @@ from functools import partial
 from pathlib import Path
 
 from .engine import Node
-from .target import Lane, Target, binary_key, cells, environment_key, instrument, instrument_key, sh, subjects
+from .target import SUITE_REGISTRY, Target, accepted, binary_key, environment_key, instrument, instrument_key, registry, sh
 
-#: the carry cells the kernel's gate reads first; `--cells gate` selects them
-GATE_CELLS = ("nl64k-alt-k4", "flagship-dense", "flagship-alt-k4", "flagship-cohort-k4")
+#: the points the kernel's gate reads first; `--points gate` selects them
+GATE_POINTS = ("L65536-N65536-dv64", "L1024-N65536-dv64")
 KERNEL_SOURCE = ("csrc/rola/src", "build/generated/carry_parts.inc")
+CELL_FILES = ("benchmarks/cells/carry_cells.json", "benchmarks/cells/layer_cells.json")
 
 
 @dataclass
 class Options:
     references: list[Target]
+    points: str = "all"
     cells: str = "all"
     subjects: str = "all"
     reps: int = 11
@@ -41,12 +47,32 @@ class Options:
     rounds: int = 8
 
 
-def _select(available: tuple[str, ...], choice: str) -> list[str]:
-    """The chosen cells among `available` (one module's or one subject's): all of them, the gate cells, or a list, which
-    `nodes_for` has already checked against the target's carry cells."""
-    if choice == "all":
-        return list(available)
-    return [c for c in (GATE_CELLS if choice == "gate" else choice.split(",")) if c in available]
+def points(t: Target, opt: Options) -> list[dict]:
+    """The selected points, resolved against the target's registry and narrowed to `--cells`; a point left without a rola
+    cell is dropped."""
+    reg = registry(t)
+    names = sorted(reg.points) if opt.points == "all" else list(GATE_POINTS if opt.points == "gate" else opt.points.split(","))
+    unknown = sorted(set(names) - set(reg.points))
+    if unknown:
+        raise SystemExit(f"no point {unknown} in the registry ({SUITE_REGISTRY.name})")
+    wanted = None if opt.cells == "all" else set(opt.cells.split(","))
+    out = []
+    for name in names:
+        point = reg.point(name)
+        runners = {r: [c for c in cells if wanted is None or c["name"] in wanted or r != "rola"]
+                   for r, cells in point["runners"].items()}
+        if runners.get("rola"):
+            out.append({**point, "runners": runners})
+    if wanted is not None:
+        missing = sorted(wanted - {c["name"] for p in out for c in p["runners"]["rola"]})
+        if missing:
+            raise SystemExit(f"--cells {missing} are not rola cells of the selected points")
+    return out
+
+
+def rola_cells(t: Target, opt: Options) -> dict[str, dict]:
+    """Every rola cell of the selected points, by name, with what the target's runner makes of it."""
+    return accepted(t, t, tuple(sorted({c["name"] for p in points(t, opt) for c in p["runners"]["rola"]})))
 
 
 def _identity(t: Target, entry: str, data: tuple[str, ...] = (), **params) -> dict:
@@ -73,7 +99,10 @@ def carry_nodes(t: Target, opt: Options, wanted: set[str]) -> list[Node]:
     add("carry.sass", "", _identity(t, "tools/sass_gate.py"), ["tools/sass_gate.py", so], False, 900)
     add("carry.registers", "arm0", _identity(t, "tools/life_ranges.py", KERNEL_SOURCE, arm=0),
         ["tools/life_ranges.py", "--arm", "0", "--source", "csrc/rola/src/carry/carry_kernel.cuh"], False, 1800)
-    for cell in _select(cells(t, "carry"), opt.cells):
+    registry_cells = registry(t).cells
+    carry = sorted(name for name, v in rola_cells(t, opt).items()
+                   if "arms" in v and registry_cells[name]["data"].endswith(":carry_cell"))
+    for cell in carry:
         sched = t.schedule_for(cell)
         add("carry.phases", cell, _identity(t, "tools/phase_ledger.py", ("benchmarks/cells/carry_cells.json",), launches=1),
             ["tools/phase_ledger.py", cell, "--launches", "1"], True)
@@ -102,10 +131,8 @@ def _timeline(t: Target, cell: str, dest: Path) -> None:
         dest.write_text(out.read_text())
 
 
-#: THE ATTENTION REFERENCE rides every session of these subjects, as a foreign arm (`rola_bench/measure/attention.py`)
+#: THE ATTENTION REFERENCE rides every session of these subjects on a point that sends the attention runner a cell
 ATTENTION_SUBJECTS = ("carry_forward", "prefill_op")
-#: what makes the attention arm's point fair against the rola arms
-ATTENTION_MATCHING = "the cell's tokens and value width, one head; capacity-fair where the cell's states equal its tokens"
 SUITE_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -114,39 +141,62 @@ def arm_name(subject: str, calls: int, schedule: str) -> str:
     return subject + (f"@calls={calls}" if calls != 1 else "") + (f"@schedule={schedule}" if schedule != "first" else "")
 
 
+def _units(arms: list[str]) -> set[tuple[str, int]]:
+    """The (subject, call count) units among a cell's arm names, at the default state arm."""
+    out = set()
+    for name in arms:
+        subject, *dials = name.split("@")
+        fields = dict(d.split("=", 1) for d in dials)
+        if "state" not in fields:
+            out.add((subject, int(fields.get("calls", 1))))
+    return out
+
+
 def timing_nodes(t: Target, opt: Options, wanted: set[str]) -> list[Node]:
-    """One interleaved session per unit (a subject at a call count) and cell: the target (role `subject`), every
-    reference (role `reference`), and for a carry subject the attention reference, each an arm of rola's
-    `tools/compare.py` run from the target, every rola arm built by its own checkout under its own venv."""
+    """One interleaved session per point, unit (a subject at a call count) and carry order: the target (role `subject`),
+    every reference (role `reference`) and, for a carry subject on a point with an attention cell, the attention reference,
+    each an arm of rola's `tools/compare.py` run from the target on the point's cells every rola arm accepts."""
     if "timing.session" not in wanted:
         return []
-    arms = [("subject", t)] + [("reference", r) for r in opt.references]
-    roster = subjects(t)
-    names = sorted({subject for subject, _calls in roster})
-    chosen = names if opt.subjects == "all" else opt.subjects.split(",")
+    labelled = [("subject", t)] + [("reference", r) for r in opt.references]
+    selected = points(t, opt)
+    every = tuple(sorted({c["name"] for p in selected for c in p["runners"]["rola"]}))
+    takes = {a.label: accepted(a, t, every) for _role, a in labelled}
     nodes = []
-    for subject in chosen:
-        if subject not in names:
-            raise SystemExit(f"{subject} is not a bench subject of {t.label}: {names}")
-        for calls in sorted(n for s, n in roster if s == subject):
-            applies = roster[subject, calls].cells
-            carry = set(applies) <= set(cells(t, "carry"))
-            for cell in _select(applies, opt.cells) if carry else list(applies):
-                lanes = [(role, a, subjects(a).get((subject, calls))) for role, a in arms]
-                attention = subject in ATTENTION_SUBJECTS
-                identity = {"arms": [{"role": role, "binary": binary_key(a),
-                                      "instrument": instrument_key(a, "tools/compare.py", ("benchmarks/bench/provider.py",
-                                                                                           "benchmarks/cells/carry_cells.json")),
-                                      "arm": arm_name(subject, calls, a.schedule_for(cell) if "carry" in subject else "first"),
-                                      "lane": [lane.bench, lane.calls] if lane else None} for role, a, lane in lanes],
-                            "attention": _digest(Path(__file__).with_name("attention.py")) if attention else None,
+    for point in selected:
+        names = tuple(c["name"] for c in point["runners"]["rola"])
+        units = sorted(set().union(*(_units(takes[t.label][n].get("arms", [])) for n in names)))
+        for subject, calls in units:
+            if opt.subjects != "all" and subject not in opt.subjects.split(","):
+                continue
+            #: one session per carry order: an arm has one name for every cell it runs on, so cells whose orders differ
+            #: for any arm (a DENSE/SPARSE target schedule) are separate sessions
+            groups: dict[tuple[str, ...], list[str]] = {}
+            for name in names:
+                orders = tuple(a.schedule_for(name) if "carry" in subject else "first" for _role, a in labelled)
+                if all(arm_name(subject, calls, order) in takes[a.label][name].get("arms", [])
+                       for (_role, a), order in zip(labelled, orders, strict=True)):
+                    groups.setdefault(orders, []).append(name)
+            for orders, cells in sorted(groups.items()):
+                attention = subject in ATTENTION_SUBJECTS and "attention" in point["runners"]
+                session_cells = cells + ([c["name"] for c in point["runners"]["attention"]] if attention else [])
+                resolved = {r: [c for c in cs if c["name"] in session_cells] for r, cs in point["runners"].items()}
+                identity = {"point": {**point, "runners": {r: cs for r, cs in resolved.items() if cs}},
+                            "arms": [{"role": role, "binary": binary_key(a),
+                                      "instrument": instrument_key(a, "tools/compare.py",
+                                                                   ("benchmarks/bench/provider.py", *CELL_FILES)),
+                                      "arm": arm_name(subject, calls, order)}
+                                     for (role, a), order in zip(labelled, orders, strict=True)],
+                            "attention": (_digest(Path(__file__).with_name("attention.py"))
+                                          + _digest(Path(__file__).with_name("cells.py"))) if attention else None,
                             "environment": environment_key(t),
                             "params": {"reps": opt.reps, "warmup": opt.warmup, "rounds": opt.rounds}}
-                meta = {"arms": [{"role": role, **_meta(a)} for role, a in arms]}
-                unit = f"{subject}@{cell}" + (f"@calls={calls}" if calls != 1 else "")
+                meta = {"arms": [{"role": role, **_meta(a)} for role, a in labelled]}
+                unit = f"{subject}@{point['name']}" + (f"@calls={calls}" if calls != 1 else "") + \
+                    ("" if set(orders) == {"first"} else "@schedule=" + "+".join(dict.fromkeys(orders)))
                 nodes.append(Node("timing.session", unit, identity,
-                                  partial(_session, t, lanes, subject, calls, cell, attention, opt), repeatable=True,
-                                  meta=meta))
+                                  partial(_session, t, labelled, subject, calls, orders, point["name"], session_cells,
+                                          attention, opt), repeatable=True, meta=meta))
     return nodes
 
 
@@ -154,27 +204,23 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _session(t: Target, lanes: list[tuple[str, Target, Lane | None]], subject: str, calls: int, cell: str,
-             attention: bool, opt: Options, _deps: dict, dest: Path) -> None:
-    missing = [a.label for _role, a, lane in lanes if lane is None or cell not in lane.cells]
-    if missing:
-        raise RuntimeError(f"{missing} carry no {subject} at {calls} call(s) on {cell}")
-    argv = [t.python, "tools/compare.py", "--cell", cell, "--reference", t.label, "--reps", str(opt.reps), "--warmup",
-            str(opt.warmup), "--rounds", str(opt.rounds)]
-    for _role, a, _lane in lanes:
-        schedule = a.schedule_for(cell) if "carry" in subject else "first"
-        argv += ["--arm", f"label:{a.label},arm:{arm_name(subject, calls, schedule)},worktree:{a.worktree},venv:{a.venv}"]
+def _session(t: Target, labelled: list[tuple[str, Target]], subject: str, calls: int, orders: tuple[str, ...], point: str,
+             cells: list[str], attention: bool, opt: Options, _deps: dict, dest: Path) -> None:
+    argv = [t.python, "tools/compare.py", "--point", point, "--registry", str(SUITE_REGISTRY), "--cells", ",".join(cells),
+            "--reference", t.label, "--reps", str(opt.reps), "--warmup", str(opt.warmup), "--rounds", str(opt.rounds)]
+    for (_role, a), order in zip(labelled, orders, strict=True):
+        argv += ["--arm", f"label:{a.label},arm:{arm_name(subject, calls, order)},worktree:{a.worktree},venv:{a.venv}"]
     if attention:
-        argv += ["--foreign", f"label:attention,provider:rola_bench.measure.attention:arms,arm:flash,python:{t.python},"
-                              f"cwd:{SUITE_ROOT}", "--matching", ATTENTION_MATCHING]
+        argv += ["--foreign", f"label:attention,runner:attention,provider:rola_bench.measure.attention:arms,arm:flash,"
+                              f"python:{t.python},cwd:{SUITE_ROOT}"]
     with tempfile.TemporaryDirectory(prefix="rola_suite_session_") as tmp:
         rc, text = sh([*argv, "--out", f"{tmp}/result.json"], t.worktree, 7200)
         out = Path(tmp) / "result.json"
         if not out.exists():
             raise RuntimeError(f"compare exited {rc} without a result:\n{text[-1500:]}")
         result = json.loads(out.read_text())
-    roles = {a.label: role for role, a, _lane in lanes} | ({"attention": "attention"} if attention else {})
-    doc = {"subject": subject, "calls": calls, "cell": cell, "roles": roles, "result": result}
+    roles = {a.label: role for role, a in labelled} | ({"attention": "attention"} if attention else {})
+    doc = {"point": point, "subject": subject, "calls": calls, "roles": roles, "result": result}
     dest.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
 
 
@@ -184,8 +230,7 @@ def nodes_for(t: Target, opt: Options, modules: str) -> list[Node]:
     wanted = {m for m in known if modules == "all" or any(m == x or m.startswith(x + ".") for x in modules.split(","))}
     if not wanted:
         raise SystemExit(f"no module matches {modules!r}; known: {known}")
-    if opt.cells not in ("all", "gate"):
-        unknown = sorted(set(opt.cells.split(",")) - set(cells(t, "carry")))
-        if unknown:
-            raise SystemExit(f"not a carry cell {t.label} runs (unregistered, or no arm in its binary): {unknown}")
+    for name, verdict in sorted(rola_cells(t, opt).items()):
+        if "refused" in verdict:
+            print(f"{t.label} refuses {name}: {verdict['refused']}", flush=True)
     return carry_nodes(t, opt, wanted) + timing_nodes(t, opt, wanted)
