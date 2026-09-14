@@ -21,8 +21,8 @@ def main() -> int:
         p.add_argument("--modules", default="all", help="all, or a comma list of modules or prefixes (carry, timing.session)")
         p.add_argument("--cells", default="all", help="all, gate, or a comma list of carry cells")
         p.add_argument("--subjects", default="all", help="all, or a comma list of bench subjects")
-        p.add_argument("--reps", type=int, default=5)
-        p.add_argument("--warmup", type=int, default=2)
+        p.add_argument("--reps", type=int, default=11, help="odd: a round's median is one of its samples")
+        p.add_argument("--warmup", type=int, default=10, help="at least the driver's floor of 10")
         p.add_argument("--rounds", type=int, default=3)
         if name == "run":
             p.add_argument("--repeat", action="store_true", help="add a sample to complete nodes of repeatable modules")

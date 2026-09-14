@@ -16,6 +16,7 @@ with its declared role -- and ratios between arms are the reader's.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 from dataclasses import dataclass
@@ -35,8 +36,8 @@ class Options:
     references: list[Target]
     cells: str = "all"
     subjects: str = "all"
-    reps: int = 5
-    warmup: int = 2
+    reps: int = 11
+    warmup: int = 10
     rounds: int = 3
 
 
@@ -105,10 +106,22 @@ def _timeline(t: Target, cell: str, dest: Path) -> None:
         dest.write_text(out.read_text())
 
 
+#: THE ATTENTION REFERENCE rides every session of these subjects, as a foreign arm (`rola_bench/measure/attention.py`)
+ATTENTION_SUBJECTS = ("carry_forward", "prefill_op")
+#: what makes the attention arm's point fair against the rola arms
+ATTENTION_MATCHING = "the cell's tokens and value width, one head; capacity-fair where the cell's states equal its tokens"
+SUITE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def arm_name(subject: str, calls: int, schedule: str) -> str:
+    """A rola arm's name in its checkout's `bench.provider` grammar: the subject and its non-default dials."""
+    return subject + (f"@calls={calls}" if calls != 1 else "") + (f"@schedule={schedule}" if schedule != "first" else "")
+
+
 def timing_nodes(t: Target, opt: Options, wanted: set[str]) -> list[Node]:
-    """One interleaved session per unit (a subject at a call count) and cell: the target (role `subject`) and every
-    reference (role `reference`), each through its own checkout's probe worker and its own spelling of the unit, timed in
-    one invocation under the clock lock."""
+    """One interleaved session per unit (a subject at a call count) and cell: the target (role `subject`), every
+    reference (role `reference`), and for a carry subject the attention reference, each an arm of rola's
+    `tools/compare.py` run from the target, every rola arm built by its own checkout under its own venv."""
     if "timing.session" not in wanted:
         return []
     arms = [("subject", t)] + [("reference", r) for r in opt.references]
@@ -124,46 +137,49 @@ def timing_nodes(t: Target, opt: Options, wanted: set[str]) -> list[Node]:
             carry = set(applies) <= set(cells(t, "carry"))
             for cell in _select(applies, opt.cells) if carry else list(applies):
                 lanes = [(role, a, subjects(a).get((subject, calls))) for role, a in arms]
+                attention = subject in ATTENTION_SUBJECTS
                 identity = {"arms": [{"role": role, "binary": binary_key(a),
-                                      "instrument": instrument_key(a, "tools/probe_cells.py",
-                                                                   ("benchmarks/cells/carry_cells.json",)),
-                                      "schedule": a.schedule_for(cell) if "carry" in subject else None,
+                                      "instrument": instrument_key(a, "tools/compare.py", ("benchmarks/bench/provider.py",
+                                                                                           "benchmarks/cells/carry_cells.json")),
+                                      "arm": arm_name(subject, calls, a.schedule_for(cell) if "carry" in subject else "first"),
                                       "lane": [lane.bench, lane.calls] if lane else None} for role, a, lane in lanes],
+                            "attention": _digest(Path(__file__).with_name("attention.py")) if attention else None,
                             "environment": environment_key(t),
                             "params": {"reps": opt.reps, "warmup": opt.warmup, "rounds": opt.rounds}}
                 meta = {"arms": [{"role": role, **_meta(a)} for role, a in arms]}
                 unit = f"{subject}@{cell}" + (f"@calls={calls}" if calls != 1 else "")
-                nodes.append(Node("timing.session", unit, identity, partial(_session, t, lanes, subject, calls, cell, opt),
-                                  repeatable=True, meta=meta))
+                nodes.append(Node("timing.session", unit, identity,
+                                  partial(_session, t, lanes, subject, calls, cell, attention, opt), repeatable=True,
+                                  meta=meta))
     return nodes
 
 
-def _session(t: Target, lanes: list[tuple[str, Target, Lane | None]], subject: str, calls: int, cell: str, opt: Options,
-             _deps: dict, dest: Path) -> None:
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _session(t: Target, lanes: list[tuple[str, Target, Lane | None]], subject: str, calls: int, cell: str,
+             attention: bool, opt: Options, _deps: dict, dest: Path) -> None:
     missing = [a.label for _role, a, lane in lanes if lane is None or cell not in lane.cells]
     if missing:
         raise RuntimeError(f"{missing} carry no {subject} at {calls} call(s) on {cell}")
-    specs = []
-    for _role, a, lane in lanes:
-        spec = a.spec() + f",bench:{lane.bench}" + (f",calls:{lane.calls}" if lane.calls != 1 else "")
-        spec += f",schedule:{a.schedule_for(cell)}" if "carry" in subject else ""
-        specs += ["--binary", spec]
+    argv = [t.python, "tools/compare.py", "--cell", cell, "--reference", t.label, "--reps", str(opt.reps), "--warmup",
+            str(opt.warmup), "--rounds", str(opt.rounds)]
+    for _role, a, _lane in lanes:
+        schedule = a.schedule_for(cell) if "carry" in subject else "first"
+        argv += ["--arm", f"label:{a.label},arm:{arm_name(subject, calls, schedule)},worktree:{a.worktree},venv:{a.venv}"]
+    if attention:
+        argv += ["--foreign", f"label:attention,provider:rola_bench.measure.attention:arms,arm:flash,python:{t.python},"
+                              f"cwd:{SUITE_ROOT}", "--matching", ATTENTION_MATCHING]
     with tempfile.TemporaryDirectory(prefix="rola_suite_session_") as tmp:
-        rc, text = sh([t.python, "tools/probe_cells.py", "--bench", lanes[0][2].bench, "--cells", cell, "--reps",
-                       str(opt.reps), "--warmup", str(opt.warmup), "--rounds", str(opt.rounds), "--no-record", "--out",
-                       f"{tmp}/rows.jsonl", *specs], t.worktree, 7200)
-        rows_path = Path(tmp) / "rows.jsonl"
-        if not rows_path.exists():
-            raise RuntimeError(f"probe_cells exited {rc} without rows:\n{text[-1500:]}")
-        rows = [json.loads(line) for line in rows_path.read_text().splitlines() if line.strip()]
-    by_label = {r["binary"]: r for r in rows}
-    doc = {"subject": subject, "calls": calls, "cell": cell, "session": rows[0].get("session") if rows else None,
-           "arms": [{"role": role, "label": a.label, **{k: v for k, v in by_label.get(a.label, {}).items()
-                                                        if k not in ("worktree", "venv")}} for role, a, _lane in lanes]}
-    errors = [a["label"] for a in doc["arms"] if "error" in a or "median_of_round_medians_ms" not in a]
+        rc, text = sh([*argv, "--out", f"{tmp}/result.json"], t.worktree, 7200)
+        out = Path(tmp) / "result.json"
+        if not out.exists():
+            raise RuntimeError(f"compare exited {rc} without a result:\n{text[-1500:]}")
+        result = json.loads(out.read_text())
+    roles = {a.label: role for role, a, _lane in lanes} | ({"attention": "attention"} if attention else {})
+    doc = {"subject": subject, "calls": calls, "cell": cell, "roles": roles, "result": result}
     dest.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
-    if errors:
-        raise RuntimeError(f"arm(s) {errors} measured nothing: {[a.get('error') for a in doc['arms']]}")
 
 
 def nodes_for(t: Target, opt: Options, modules: str) -> list[Node]:

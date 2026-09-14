@@ -21,8 +21,14 @@ Every node runs the target checkout's OWN instrument (rola's `tools/*.py --json`
 venv. A checkout is measured by its own definitions, the way rola's probe runs each binary's own worker.
 
 A timing run's arms are explicit. The `--target` is the `subject`, and each `--reference` is a `reference` timed in the
-same interleaved invocation. Latency is only comparable within one session, so the session records every arm's raw
-times, role, commit and schedule. Ratios between arms are computed by the reader, and only within a session.
+same session: rola's `tools/compare.py`, run from the target, which drives rola-devtools' interleaving driver. Every
+rola arm is built by its own checkout's `bench.provider` under its own venv and named by its subject and dials
+(`carry_forward@schedule=identity`); every arm is warmed past the driver's floor of 10 launches, then called once per
+rep in a fresh random order, under the GPU lock and the clock lock. A carry subject's session also times the attention
+reference (`attention.py`: torch's forced flash backend at the cell's tokens and value width, one head), a foreign arm
+whose matching rule the session states. Latency is only comparable within one session, so the session records the
+point, the matching rule, every arm's cell and raw samples in the order taken, and the clock; the paired ratios it
+carries are to the target, within that session.
 
 ## Keys, completion, repeats
 
@@ -61,7 +67,7 @@ delta between commits.
 | `carry.counters` | carry cell | `tools/pipe_counters.py` | the profiler's pipe and resource counters, launch totals |
 | `carry.census` | carry cell | `tools/stall_census.py` | stall samples by component and reason, phase and wavefront census |
 | `carry.timeline` | carry cell | `tools/pipe_timeline.py` | the pipes' PM-sampled series over one launch |
-| `timing.session` | subject @ cell [@ calls=N] | `tools/probe_cells.py` | every arm's round medians, clock, stamps, session id |
+| `timing.session` | subject @ cell [@ calls=N] | `tools/compare.py` | every arm's cell and raw samples in order, round medians, paired ratios to the target, clock |
 
 `--cells gate` is the kernel's first four gate cells (`GATE_CELLS`). Timing covers every subject of the target's bench
 roster, at every call count it declares (`bench.subjects.Subject.calls`: the sequence as N carried calls), on every cell
