@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
+from rola_devtools.process import run
+
 #: where a checkout's repository-local imports resolve
 IMPORT_ROOTS = ("tools", "benchmarks", ".")
 
@@ -69,7 +71,9 @@ def _venv_of(worktree: Path) -> str:
 
 
 def sh(cmd: list[str], cwd: Path, timeout: int = 3600) -> tuple[int, str]:
-    done = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    """The command's return code and output. A timeout, an interrupt or the suite's own exit stops its whole process tree
+    (`rola_devtools.process`): a profiled unit's measured process otherwise outlives it on the device."""
+    done = run(cmd, cwd=cwd, timeout=timeout)
     return done.returncode, done.stdout + done.stderr
 
 
@@ -154,32 +158,34 @@ def instrument(target: Target, args: list[str], dest: Path, timeout: int = 3600)
         dest.write_text(out.read_text())
 
 
-#: THE CELLS A TARGET CAN RUN: its registry's, less every carry cell whose arm (D, DV, warps_per_cta) its binary does not
-#: carry -- the binary's own answer (`rola.ops.carry.arms()`), never the source tree's.
+#: THE CELLS A TARGET RUNS are rola's answer (`benchmarks.cells.registry.runnable`): its binary's arms decide them, and a
+#: binary without an arm its tree ships is refused before anything is planned.
 _REGISTRY = """
 import json, sys
 sys.path.insert(0, 'benchmarks')
-from benchmarks.cells.registry import CELLS
-from rola.ops.carry import arms
-carried = {tuple(arm) for arm in arms()}
-runnable = {name: (kind, spec) for name, (kind, spec) in CELLS.items()
-            if kind != 'carry' or (len(spec.widths), spec.dv, spec.warps_per_cta) in carried}
+from benchmarks.cells.registry import CELLS, runnable
+try:
+    ran = runnable()
+except RuntimeError as refusal:
+    sys.exit(f'REFUSED: {refusal}')
 """
 
 
 @cache
 def cells(target: Target, kind: str) -> tuple[str, ...]:
-    """The registry's cells of `kind` (carry or layer) the target runs; the cells its binary cannot carry are named once."""
-    code = _REGISTRY + (f"print(json.dumps([sorted(n for n, (k, _) in runnable.items() if k == {kind!r}), "
-                        f"sorted(n for n, (k, _) in CELLS.items() if k == {kind!r} and n not in runnable), sorted(carried)]))")
+    """The registry's cells of `kind` (carry or layer) the target runs; the carry cells it does not are named once."""
+    code = _REGISTRY + f"print(json.dumps({{**ran, 'cells': [n for n in ran['cells'] if CELLS[n][0] == {kind!r}]}}))"
     rc, out = sh([target.python, "-c", code], target.worktree, 600)
+    refused = [line for line in out.splitlines() if line.startswith("REFUSED: ")]
     if rc:
-        raise SystemExit(f"{target.label}: could not read the cell registry: {out[-400:]}")
-    runnable, uncarried, carried = json.loads(out.strip().splitlines()[-1])
-    if uncarried:
-        print(f"{target.label}: the binary carries {[tuple(a) for a in carried]}; left out, no arm for: "
-              f"{', '.join(uncarried)}", flush=True)
-    return tuple(runnable)
+        raise SystemExit(f"{target.label}: {refused[-1]}" if refused else f"{target.label}: could not read the cells it runs: "
+                         f"{out[-600:]}")
+    ran = json.loads(out.strip().splitlines()[-1])
+    if kind == "carry" and (ran["undeclared"] or ran["unbuilt"]):
+        print(f"{target.label}: the binary carries {[tuple(arm) for arm in ran['arms']]}; not run -- no arm in the tree: "
+              f"{', '.join(ran['undeclared']) or '-'}; a test arm this build left out: {', '.join(ran['unbuilt']) or '-'}",
+              flush=True)
+    return tuple(sorted(ran["cells"]))
 
 
 @dataclass(frozen=True)
@@ -200,7 +206,8 @@ _ROSTER = _REGISTRY + """
 from bench.subjects import SUBJECTS, applicable
 counts = sorted({n for s in SUBJECTS.values() for n in getattr(s, 'calls', (1,))})
 roster = {}
-for cell, (kind, spec) in sorted(runnable.items()):
+for cell in sorted(ran['cells']):
+    kind, spec = CELLS[cell]
     for n in counts:
         for name in applicable(spec, kind, *([n] if n != 1 else [])):
             roster.setdefault(f'{name}@{n}', []).append(cell)

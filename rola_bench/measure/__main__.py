@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 
 from rola_results import Store
@@ -12,6 +13,8 @@ from .target import parse
 
 
 def main() -> int:
+    #: a SIGTERM unwinds like an interrupt, so the unit in flight is stopped with its whole tree (`target.sh`)
+    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     ap = argparse.ArgumentParser(prog="python -m rola_bench.measure", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in (("run", "run every incomplete node"), ("plan", "list every node and whether it is complete")):
