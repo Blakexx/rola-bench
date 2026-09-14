@@ -42,15 +42,11 @@ class Options:
 
 
 def _select(available: tuple[str, ...], choice: str) -> list[str]:
+    """The chosen cells among `available` (one module's or one subject's): all of them, the gate cells, or a list, which
+    `nodes_for` has already checked against the target's carry cells."""
     if choice == "all":
         return list(available)
-    if choice == "gate":
-        return [c for c in GATE_CELLS if c in available]
-    wanted = choice.split(",")
-    unknown = sorted(set(wanted) - set(available))
-    if unknown:
-        raise SystemExit(f"not a cell the target runs (unregistered, or no arm in its binary): {unknown}")
-    return wanted
+    return [c for c in (GATE_CELLS if choice == "gate" else choice.split(",")) if c in available]
 
 
 def _identity(t: Target, entry: str, data: tuple[str, ...] = (), **params) -> dict:
@@ -188,4 +184,8 @@ def nodes_for(t: Target, opt: Options, modules: str) -> list[Node]:
     wanted = {m for m in known if modules == "all" or any(m == x or m.startswith(x + ".") for x in modules.split(","))}
     if not wanted:
         raise SystemExit(f"no module matches {modules!r}; known: {known}")
+    if opt.cells not in ("all", "gate"):
+        unknown = sorted(set(opt.cells.split(",")) - set(cells(t, "carry")))
+        if unknown:
+            raise SystemExit(f"not a carry cell {t.label} runs (unregistered, or no arm in its binary): {unknown}")
     return carry_nodes(t, opt, wanted) + timing_nodes(t, opt, wanted)
