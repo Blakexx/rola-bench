@@ -1,0 +1,40 @@
+# TINY-BACKBONE ablation: do many routed states rescue a small backbone on MQAR?
+# d_model = 64 (half the grid's), N = 256 (recurrent state >> backbone), full LR sweep.
+# RE-PINNED 2026-08-02 (Phase 1.5): the pre-V3 arm was `rola-rla-kappa-asym` at d_qk=12, a preset
+# defined by the retired `state_norm='kappa'`. The question the
+# spec asks is architecture-independent, so it survives with the V3 slate; the old rows do not.
+#
+#   python -m rola_bench.fleet mqar dmodel64
+#
+# WHY IT IS WORTH KEEPING ALONGSIDE law_grid.yaml: the law grid holds the backbone fixed and moves
+# N and L. This spec moves the BACKBONE against a fixed large N — the "is routed state a substitute
+# for width" question, which is the one place a state-vs-parameters trade shows up in the synthetic
+# tier. The D1 dense control matters most here: if the tiny backbone is rescued equally by an
+# unstructured single dense level, the rescue is capacity, not addressing.
+project_name: canonical-mqar-grid
+backbone: {d_model: 64, vocab: 8192, n_layers: 2, l_max: 4096}
+data:     {preset: ext, train_batch: 128, test_batch: 8, cache_dir: /tmp/zoology_cache_rwext}
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1, 2]
+  early_stopping_threshold: 2.0
+  early_stopping_metric: valid/accuracy
+  slice_keys: [num_kv_pairs, input_seq_len]
+  eval_every: 10
+lrs: [0.0003, 0.001, 0.003, 0.01, 0.03]
+ncs: [256]
+tiers:
+  all:
+    # The routed slate at the tiny backbone. `d_v` is left at the pinned MQAR geometry (64) so the
+    # only thing that moved versus canonical.yaml is d_model — one axis per spec.
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       run_id: "grid-routed-{tag}-d{d_model}-nc{nc}_L{L}_st{st}_lr{lr:.0e}_s{seed}"}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3,
+       run_id: "grid-routed-{tag}-d{d_model}-nc{nc}_L{L}_st{st}_lr{lr:.0e}_s{seed}"}
+    - {build: routed, instance: rola-d1-dense, tag: d1,
+       run_id: "grid-routed-{tag}-d{d_model}-nc{nc}_L{L}_st{st}_lr{lr:.0e}_s{seed}"}
+    # Matched-state monoliths at d_model=64 — does routing beat them at tiny width?
+    - {build: baselines, methods: [rla, gla], shapes: [wide, square], ncs: [256],
+       run_id: "grid-{method}-{shape}-d{d_model}-nc{nc}_L{L}_st{st}_lr{lr:.0e}_s{seed}"}
+fleet: {batch: 1, per_batch_timeout: 18000}   # high-N cells run ~hours

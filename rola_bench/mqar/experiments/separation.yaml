@@ -1,0 +1,117 @@
+# THE SEPARATION CELLS — the N = L diagonal at 16K-64K. Specced 2026-08-02 (Phase 1.4b).
+#
+#   python -m rola_bench.fleet mqar separation        # RENTED A100-class only; see the cost note below
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT THESE CELLS ARE
+# ------------------------------------------------------------------------------------------------
+# Symbols: N = addressable states per head (`nc`); L = sequence length; alpha_cap = N/L.
+#
+# The law grid (law_grid.yaml) establishes WHERE the boundary is, at small scale, by walking
+# alpha_cap through 1 in both directions. These cells sit ON the boundary (alpha_cap = 1 exactly,
+# N = L) at three rungs two to three orders of magnitude further out — 16384, 32768, 65536 — where
+# the structural cost differences between the transition-structure rungs stop being a rounding error
+# and become the result. Every arm below is pinned to a SINGLE (N, L) pair; this file deliberately
+# does not cross its axes, because the diagonal is the object of interest, not the surface.
+#
+# WHAT RUNS, AND WHAT IS A COST COLUMN INSTEAD
+#
+#   * the three RoLA WIRINGS — TRAINED at all three rungs. They differ in touched slots per token
+#     (O(N) / O(sqrt N) / O(1)), so this is the diagonal on which the touch-product law is a cost
+#     statement rather than an asymptotic one. At these rungs they factorize as [128,128],
+#     [128,256] and [256,256].
+#
+#   * the D1 DENSE CONTROL — **absent from the diagonal, and its absence is a RESULT.** An
+#     unfactorized router is one softmax over N logits, and the V3 engine caps a routing level at
+#     `MAX_BRANCH_WIDTH = 256` (its routing topology). So above N = 256 the
+#     monolithic control has no spelling at all, while every factorized wiring still does. That is
+#     the structural argument for factorization stated as a buildability fact rather than a curve,
+#     and `build_configs` prints the omission with the engine's own number every time this spec
+#     expands. The control's quality comparison lives where it CAN be made — the law grid, whose N
+#     ladder tops out at 256 precisely because that is where the control stops existing.
+#
+#   * GDN — runs at ITS AFFORDABLE RUNGS ONLY, and its exit is a REPORTED COLUMN, not a gap and not
+#     a fake run. FLA's GatedDeltaNet caps `head_dim` at 256, so at the pinned MQAR geometry
+#     (H = 4, d_v = 64, content = 256*N floats) it reaches:
+#         wide   (head_dim = N)      -> N <= 256
+#         square (head_dim = 8*sqrt N) -> N <= 1024
+#     Both are 1-2 orders of magnitude below the smallest separation rung. The correct statement in
+#     the paper is therefore "GDN cannot be placed on this diagonal at all, and here is the rung at
+#     which it stops", not "GDN was omitted". `build_configs` prints every omitted cell with its
+#     reason, and `canonical_baselines.MAX_GDN_HEAD_DIM` is the constant that says why. The
+#     `gdn_ceiling` tier below runs GDN at its two last reachable rungs so the exit point is
+#     MEASURED rather than asserted from the cap arithmetic.
+#
+#   * attention — the reference. Present at 16384 only. At 32768 and 65536 the O(L^2) score matrix
+#     is 1.1 GiB and 4.3 GiB PER HEAD PER LAYER in fp16 through zoology's unfused `SelfAttention`
+#     (it materializes `scores` explicitly), so those two rungs are a cost column on the same
+#     footing as GDN's: reported with the arithmetic, not run.
+#
+# PREREQUISITES THIS SPEC DEPENDS ON (both structural, both stated rather than worked around):
+#   * `vocab > L` is a zoology MQAR requirement (keys are drawn distinct from the vocabulary), so
+#     `backbone.vocab` is 131072 here, not the grid's 8192. That is a real change to the embedding
+#     table and therefore to the parameter count; the arms remain matched to EACH OTHER because the
+#     backbone is shared, which is the property that matters.
+#   * data generation at L = 65536 is itself substantial (`num_examples` is deliberately small).
+#
+# COST: RENTED A100-class, [[local-small-rented-big]]. Nothing in this file is a local cell and
+# nothing in it was run when it was written. The state per layer at N = 65536 is 256*65536 =
+# 16.8M content floats/head-group; the routed materialization axis is N, which is the axis
+# [[rola-nc-materialization-wall]] says still bites in backward.
+project_name: rola-separation
+backbone: {d_model: 128, vocab: 131072, n_layers: 2, l_max: 65536}
+data:
+  train_batch: 4
+  test_batch: 2
+  cache_dir: /tmp/zoology_cache_separation
+  protocol:
+    # Item load held at a fixed RATIO of L (kv = L/16), so the rungs are the same task at four
+    # scales; 4*kv <= L holds with room (4*(L/16) = L/4). Each train length answers for itself —
+    # a 16K cell is never evaluated at 64K, and no rung inherits another's ladder.
+    train_examples: 4000
+    test_examples: 200
+    by_train_len:
+      256:   {train_kv: [16],   test_seq_lens: [256],   test_kv_by_len: {256:   [16]}}
+      1024:  {train_kv: [64],   test_seq_lens: [1024],  test_kv_by_len: {1024:  [64]}}
+      16384: {train_kv: [1024], test_seq_lens: [16384], test_kv_by_len: {16384: [1024]}}
+      32768: {train_kv: [2048], test_seq_lens: [32768], test_kv_by_len: {32768: [2048]}}
+      65536: {train_kv: [4096], test_seq_lens: [65536], test_kv_by_len: {65536: [4096]}}
+train:
+  max_epochs: 20
+  weight_decay: 0.0
+  seeds: [0, 1, 2]                       # >= 3 seeds; separation is a claim about a gap, not a point
+  early_stopping_threshold: 2.0
+  early_stopping_metric: valid/accuracy
+  slice_keys: [num_kv_pairs, input_seq_len]
+  eval_every: 5
+lrs: [0.003, 0.01]                       # narrowed to the pre-V3 calibrated band; rental budget
+ncs: [16384]
+seq_lens: [16384]
+tiers:
+  # --- the diagonal, one tier per rung so a box runs exactly one scale --------------------------
+  "diag16k":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1, ncs: [16384], seq_lens: [16384]}
+    - {build: routed, instance: rola-arm2-union,                tag: arm2, ncs: [16384], seq_lens: [16384]}
+    - {build: routed, instance: rola-arm3-levelsplit,           tag: arm3, ncs: [16384], seq_lens: [16384]}
+    # NO d1 arm: the unfactorized control has no spelling above MAX_BRANCH_WIDTH = 256 (header).
+    - {build: attn, seq_lens: [16384]}
+  "diag32k":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1, ncs: [32768], seq_lens: [32768]}
+    - {build: routed, instance: rola-arm2-union,                tag: arm2, ncs: [32768], seq_lens: [32768]}
+    - {build: routed, instance: rola-arm3-levelsplit,           tag: arm3, ncs: [32768], seq_lens: [32768]}
+  "diag64k":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1, ncs: [65536], seq_lens: [65536]}
+    - {build: routed, instance: rola-arm2-union,                tag: arm2, ncs: [65536], seq_lens: [65536]}
+    - {build: routed, instance: rola-arm3-levelsplit,           tag: arm3, ncs: [65536], seq_lens: [65536]}
+  # --- GDN's ceiling, MEASURED. Its last reachable rung per shape, at N = L on each. -------------
+  "gdn_ceiling":
+    - {build: baselines, methods: [gdn], shapes: [wide],   ncs: [256],  seq_lens: [256]}
+    - {build: baselines, methods: [gdn], shapes: [square], ncs: [1024], seq_lens: [1024]}
+    # ... and the other two rungs of the ladder AT THE SAME (N = L) points, so GDN's exit is read
+    # against contenders measured on the diagonal rather than against an off-diagonal cell.
+    - {build: baselines, methods: [rla, gla], shapes: [wide, square], ncs: [256],  seq_lens: [256]}
+    - {build: baselines, methods: [rla, gla], shapes: [wide, square], ncs: [1024], seq_lens: [1024]}
+fleet:
+  env: {GRID_TIERS: "diag16k"}
+  batch: 1
+  per_batch_timeout: 86400

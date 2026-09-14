@@ -1,0 +1,29 @@
+# paper_v1 — the paper's systems numbers: RoLA against real external implementations, layer against layer at
+# d_model 512 (`rola_bench/perf/README.md` has the protocol: round-robin arms, medians and IQRs, isolated memory
+# passes, UNBUILT/OOM/ERR rows).
+# Arms: causal SDPA attention (the growing-KV ceiling), the named RoLA cell rola-base-rla (`rola_bench.models.rola`,
+# built through fla), and fla's GLA and GatedDeltaNet layers at their canonical geometry; DeltaNet and GSA
+# are arms `scaling.py` also builds. Mamba2 is not an arm: it needs an SSM-shaped state cache the decode bench does
+# not build.
+#
+# `SCALE_DECODE_GRAPHED=1` adds a CUDA-graph replay of each recurrent arm's decode beside its eager cell.
+#
+# Launch:
+#   python -m rola_bench.fleet perf paper_v1 --boxes 1
+
+benches: [scaling-train, scaling-prefill, scaling-decode]
+reps: 20
+
+fleet:
+  image: "blakeresearch/rola-bench:v40"
+  offer_query: "gpu_name=A100_PCIE num_gpus=1 rentable=true reliability>0.97 inet_down>500 inet_down_cost<0.01 inet_up_cost<0.01"
+  idle_timeout: 1800
+  batch: 1
+  per_batch_timeout: 10800
+  env:
+    SCALE_ARMS: "attn,rola-base-rla,gla,gdn"
+    SCALE_DECODE_GRAPHED: "1"
+    SCALE_NS: "256"
+    SCALE_DVS: "64"
+    SCALE_PREFLIGHT_ARMS: "1"
+    PERF_B: "2"

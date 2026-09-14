@@ -1,0 +1,106 @@
+# THE LAW GRID — the small-scale two-factor design that tests the capacity theory's boundaries.
+# Built 2026-08-02 (Phase 1.4a). Expanded by rola_bench.mqar.build_configs; GRID_TIERS selects tiers.
+#
+#   python -m rola_bench.fleet mqar law_grid
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT THIS GRID IS FOR
+# ------------------------------------------------------------------------------------------------
+# Symbols: N = addressable RoLA states per head (`nc`); L = sequence length; alpha_cap = N/L, the
+# capacity ratio the N = L boundary theorem is stated in; kv = num_kv_pairs, the ITEM count.
+#
+# Two factors, deliberately crossed and deliberately unconfounded:
+#
+#   FACTOR 1 — CAPACITY. `ncs` x `seq_lens` is a full cross, so alpha_cap walks through 1 from BOTH
+#   directions at fixed everything-else. The pre-V3 grid could not do this: L lived inside the `ext`
+#   data preset and N in `ncs`, they were never crossed, and alpha_cap was only ever derivable
+#   post-hoc. The diagonal cells (N = L: 32/32, 64/64, 128/128, 256/256) are the boundary itself.
+#
+#   FACTOR 2 — LOAD. `data.protocol` trains on a FIXED item ladder (`train_kv`) at every L, and
+#   evaluates the SAME item ladder at every test length. Because `slice_keys: [num_kv_pairs]`
+#   reports accuracy per item count, one trained cell yields the whole items/capacity ratio kv/N as
+#   evaluation slices at no extra cost — the existing fixed-L sweep-capacity protocol, generalized
+#   off `ext`'s hard-coded ladder. Holding the item ladder constant across L is what UNCONFOUNDS the
+#   ratio effect from the absolute-length effect; `ext` tied them together (longer sequences carried
+#   more pairs), so no pre-V3 row can separate the two.
+#
+#   L-EXTRAPOLATION is a first-class axis, not a by-product: `test_seq_lens` runs to 2048 while the
+#   longest TRAIN length is 256, so every cell reports in-distribution and out-of-distribution
+#   slices side by side, at matched item counts.
+#
+# CONTENDERS: the taxonomy ladder, one occupant per transition-structure rung — vanilla LA (`rla`),
+# gated LA (`gla`), gated delta rule (`gdn`), attention (`attn`). GDN runs BOTH shapes: its
+# extrapolation behaviour is shape-dependent (keys-only growth vs square), so shape is a covariate
+# the grid must carry, not a choice it may make. GDN-wide's `head_dim <= 256` kernel cap makes its
+# top rungs unreachable; those cells are omitted with a printed reason and are a COST COLUMN for
+# GDN, never missing data.
+#
+# ROLA: the three canonical wirings plus the D1 DENSE CONTROL. The control is the map-family
+# baseline — a single dense softmax level, i.e. monolithic normalized-exponential linear attention
+# in RoLA's own vocabulary. Any structure that does not beat it at matched N and d_v bought nothing.
+#
+# SEEDS: three, per the retrospective's ruling. Variance is part of the law claim.
+# CAPACITY COORDINATE: `st` in every run_id is the REALIZED content-state readback
+# (rola_bench.mqar.realized_state), never a formula and never the trainer's logged state total.
+#
+# THE STATE-LADDER FLOOR. The N ladder starts at 16, not 2. The V3 CUDA consumer instantiated
+# `BC in (16, 64)` only, and the readout tile had to DIVIDE N, so a routed arm below N = 16 had no
+# launchable eval geometry. The monolithic baselines have no such floor; their curves simply start
+# lower, and the asymmetry is stated rather than hidden by trimming everyone to the same rungs. rola
+# pads any level width now, so a routed rung below 16 is spellable; extending the ladder down is a
+# spec decision not yet taken.
+#
+# SIZE: 4 RoLA arms x 5 ncs x 4 L x 4 lrs x 3 seeds = 960 routed cells; 3 methods x 2 shapes x
+# 5 ncs x 4 L x 4 lrs x 3 seeds = up to 1440 baseline cells before structural exits; 48 attention
+# cells. Tier-split for dispatch.
+project_name: rola-law-grid
+backbone: {d_model: 128, vocab: 8192, n_layers: 2, l_max: 2048}
+data:
+  train_batch: 128
+  test_batch: 8
+  cache_dir: /tmp/zoology_cache_lawgrid
+  protocol:
+    # Trained item ladder — IDENTICAL at every train length (this is the unconfounding).
+    train_kv: [2, 4, 8]
+    train_examples: 20000
+    # Evaluation lengths. Everything above 256 (the longest TRAIN length) is an extrapolation slice.
+    test_seq_lens: [32, 64, 128, 256, 512, 1024, 2048]
+    test_examples: 1000
+    # The SAME item ladder at every length, truncated only where zoology's structural 4*kv <= L
+    # bound makes a cell impossible (2*kv of key/value context + a 2*kv query block).
+    test_kv_by_len:
+      32:   [2, 4, 8]
+      64:   [2, 4, 8, 16]
+      128:  [2, 4, 8, 16, 32]
+      256:  [2, 4, 8, 16, 32]
+      512:  [2, 4, 8, 16, 32]
+      1024: [2, 4, 8, 16, 32]
+      2048: [2, 4, 8, 16, 32]
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1, 2]                       # >= 3: variance is part of the law claim
+  early_stopping_threshold: 2.0          # never triggers — want full training
+  early_stopping_metric: valid/accuracy
+  # BOTH slice axes. num_kv_pairs alone cannot separate an extrapolation slice from an
+  # in-distribution one of the same item count, which is the whole point of the unconfounding.
+  slice_keys: [num_kv_pairs, input_seq_len]
+  eval_every: 10
+lrs: [0.001, 0.003, 0.01, 0.03]          # brackets both optima the pre-V3 calibration found
+ncs: [16, 32, 64, 128, 256]              # the N ladder (floor = the pinned readout tile)
+seq_lens: [32, 64, 128, 256]             # the L ladder — CROSSED with ncs; alpha_cap in [0.0625, 8]
+tiers:
+  # T1 — the RoLA slate: three canonical wirings + the D1 dense control.
+  "rola":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1}
+    - {build: routed, instance: rola-arm2-union,                tag: arm2}
+    - {build: routed, instance: rola-arm3-levelsplit,           tag: arm3}
+    - {build: routed, instance: rola-d1-dense,                  tag: d1}
+  # T2 — the contender ladder. Both GDN shapes are mandatory (shape is a covariate, see header).
+  "contenders":
+    - {build: baselines, methods: [rla, gla, gdn], shapes: [wide, square]}
+  # T3 — the attention reference (unbounded state; no rung on the capacity axis).
+  "attn":
+    - {build: attn}
+fleet:
+  env: {GRID_TIERS: "rola"}              # which tier a box runs; the manager queue must match

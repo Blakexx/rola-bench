@@ -1,0 +1,402 @@
+# THE PRESENCE GRID — v1's SOLE THEORY-CONFIRMATION INSTRUMENT.
+# Built 2026-08-03. Data generator: `zoology.data.presence_recall` (task, layout and stamp in its
+# module docstring). Design of record: the V3 capacity-theory notes of 2026-07-29,
+# "THE PRESENCE-RECALL TASK" (user, ratified 2026-08-03).
+#
+#   GRID_TIERS=presence16 flock /tmp/rola_gpu.lock \
+#       python -m rola_bench.mqar.local_grid --config presence_grid     # add --dry-run first
+#
+# *** NOT DISPATCHED. Training is PARKED until the CUDA engine is complete, including the native
+# *** backward ([[cuda-engine-first-kill-triton]]). This file is the instrument, ready to run; the
+# *** only thing that has been executed against it is `--dry-run` and the toy `--smoke`.
+#
+# ------------------------------------------------------------------------------------------------
+# AMENDMENT 2026-08-15 (user-ruled; the engine repoint to rola-standalone)
+# ------------------------------------------------------------------------------------------------
+# 1. SQUARES ONLY. The CUDA engine's uniform-width rule makes N = B^D the law and the envelope
+#    fails fast on anything else; N = 32 and N = 128 have no multi-level uniform spelling at any
+#    depth. The D>=2 ladders RE-PIN to square rungs: presence16 -> N in {16, 64}; presence64 ->
+#    N in {64, 256} (widths (8,8) and (16,16)). PREDICTED-1's chi=64 crossing is now bracketed
+#    4x (64..256) instead of 2x; the bracket's width is reported with the fit. The D=1 (flat)
+#    ladders are unconstrained (any single width) and keep their rungs.
+# 2. THE DECAY TIER (presence_decay16) IS DEFERRED. Decay is retired from the operator and fails
+#    fast forward AND backward; InclusionGatedDecay has no standalone spelling; and a mixed-engine
+#    contrast (kernel-trained decay-off column vs oracle-trained decay arms) would confound the
+#    tier by engine. It re-enters with the decay reopen, on one engine, whole.
+# 3. ENGINE NOTE: all wall/schedule estimates below predate the repoint (they price the fp64
+#    oracle path the grid formerly trained on); the local smoke re-prices them on the CUDA engine.
+# ------------------------------------------------------------------------------------------------
+# WHAT THIS GRID IS FOR
+# ------------------------------------------------------------------------------------------------
+# SYMBOLS, defined here at first use. `pi` = the random-once-frozen map from a key token to the key
+# token it reads, with `pi(x) != x`, frozen per cell and stamped. `K` = `demand` = the key pool size.
+# `s` = `keys_per_sequence`, the key events one sequence emits (each key at most once). `chi` = the
+# DEMAND: the chromatic number of the realized union co-occurrence graph, SOLVED per segment by
+# `zoology.data.graph_chi`. `N` = addressable RoLA states per head (`nc`). `L` = sequence length in
+# tokens. `d_qk` = attention's per-head key width.
+#
+# THE TASK. Every key position's label is one bit: has `pi(x_t)` appeared strictly before t? Against
+# `graph_grid.yaml` (retained as the SEQUEL's instrument) this changes three things on purpose:
+#
+#   (1) THE VALUE CONFOUND IS GONE. MQAR-family recall entangles addressing with log|V|-bit value
+#       retrieval, so a capacity curve there cannot say which of the two moved. One bit of output
+#       makes the cell a measurement of N and nothing else.
+#   (2) READS AND WRITES ARE ASYMMETRIC BY CONSTRUCTION. Every position writes `f(x_t)` and reads
+#       `f(pi(x_t))`, so `addr_read(x) = addr_write(pi(x))` is a LEARNED property. MQAR's read cue IS
+#       the written content — the one regime where a shared routing solve gets address agreement for
+#       free — and that coincidence is what PREDICTED-4 below is built to remove.
+#   (3) SUPERVISION IS DENSE and causality is native ("before" is the causal mask's own semantics).
+#
+# THE DEMAND IS STILL chi, AND IT IS STILL SOLVED. A false positive is an error, so every key a
+# sequence draws must be separately distinguishable at once: the conflict group is the drawn key set,
+# the union over sequences of those cliques is the COMPLETE graph on the pool, chi = K. Each segment
+# solves its own realized graph (verified clique + verified coloring) and `verify_construction` gates
+# the answer against the closed form, so a cell whose sample under-realizes K_K is refused rather
+# than shipped with an x-coordinate the model was never shown. `slice_keys` names the stamp, so every
+# result row is keyed on the demand the model actually saw.
+#
+# THE ITEM COUNT AND THE DEMAND ARE 2x APART IN EVERY CELL, for free: a sequence draws `s = K / 2`
+# keys but the pool is K, so an account that says a fixed state pays for the ITEMS OF A SEQUENCE and
+# an account that says it pays for the DEMAND predict thresholds a factor of 2 apart — and the N
+# ladders resolve a factor of 2. (`s < K` is not a decoration: with the whole pool drawn, the
+# negative class runs out at the tail of every sequence and the planted 50/50 balance would decay
+# into a positional prior. The generator refuses `keys_per_sequence == demand` by name.)
+#
+# THE CHANCE LINE IS 0.5 AND IT IS PRINTED WITH EVERY NUMBER. The label is one bit at a ~50/50
+# planted balance (`presence_positive_rate` and the worst per-position deviation
+# `presence_position_bias` are stamped per segment), so the best label-free predictor scores 0.5 and
+# a collapse threshold read at 0.5 would be the threshold of GUESSING.
+# `rola_bench.mqar.analysis.graph` therefore carries a per-task chance line and defaults this grid's
+# criterion to 0.75 — halfway from chance to ceiling. An untrained model sits BELOW 0.5 (it must
+# first learn to answer inside the reserved label pair at all), so "off chance" here means ABOVE.
+#
+# ARMS — the three canonical wirings plus the D1 DENSE CONTROL, and an ATTENTION CAPACITY COLUMN.
+# The fixed-state class baselines (rla / gla / gdn) stay out for the same reason as in
+# `graph_grid.yaml`: they are established on the law grid at this exact backbone and no claim in this
+# file is about them.
+#
+# THE ATTENTION COLUMN IS A REFERENCE AND A SECOND AXIS, NEVER A CONTENDER. Softmax attention has no
+# rung on the state axis (its state is a growing KV cache), so it is never plotted against N. It does
+# two jobs: its WIDEST head establishes the INSTRUMENT FLOOR (is this family solvable by this
+# backbone at this length? — a routed failure under a floor far from ceiling measures generator
+# difficulty, not demand), and its own capacity law is linear in `d_qk` against `log2(chi)`, which
+# turns the packing constant `c` into a measurement. `presence-k32` exists ONLY for that fit: a slope
+# needs three distinct demands (`mqar.analysis.graph.fit_packing_constant` refuses two by name), and log2
+# chi = 4, 5, 6 is the cheapest way to get them.
+#
+# *** MEASURED BEFORE DISPATCH, AND ADJUDICATED. ***
+# The floor cell was probed before dispatch (MHA d_qk = 32, presence-k16, FULL protocol, lr 0.003,
+# seed 0 -> 0.508 = chance, while routed arm2 solved the same family on a smaller budget), and the
+# contradiction that number posed to the paragraph above was ADJUDICATED before this file moved
+# again. Full matrix (LR sweep, depth and width controls, a learned always-attendable SINK control,
+# an MQAR positive control, and a matched-budget arm2 anchor) is the presence-recall workflow's
+# attention-adjudication record. VERDICT: (b) OPTIMIZATION
+# ARTEFACT, not architecture. Attention solves presence-k16 PERFECTLY at lr 1e-3 (1.000 by epoch 5;
+# 1.000 at 3e-4, 0.974 at 1e-4) at the same 2 layers and d_qk = 32. The failure is a sharp,
+# TASK-SPECIFIC LR cliff bracketed [1e-3, 3e-3]: the very 3e-3 that fails here trains MQAR kv8 to
+# 1.000, and the sink control discriminated against the absence-representation reading TWICE (it
+# adds nothing at 1e-3 and rescues nothing at 3e-3, 0.508 either way). The 0.508 is therefore NEVER
+# citable as evidence about attention's readout — it is a number about one learning rate.
+# CONSEQUENCES, folded into this file rather than left open: the floor logic of the paragraph above
+# STANDS — attention certifies the family solvable at 1.000 at the swept protocol below — and
+# PREDICTED-3 is measurable at that protocol. The pinned single LR is GONE; see LR IS SWEPT PER ARM
+# below. The matched-budget fairness anchor (arm2 = 0.858 at 3e-3, its ONLY measured full-budget
+# rate) carries the same one-LR caveat the attention floor did, which is exactly why the routed
+# arms get the same sweep rather than a pinned rate.
+#
+# ============================ ADVANCE PREDICTIONS ============================
+# Recorded BEFORE the run, per the house rule; each names what would falsify it.
+#
+# PREDICTED-1 (the demand law, in N). Every routed arm's collapse threshold `N*` tracks the SOLVED
+#   chi: `presence-k64` crosses near N = 64 (its ladder starts at 32 = chi/2, so the crossing is
+#   interpolable), and `presence-k16` is ALREADY above criterion at its lowest available rung
+#   N = 16 = chi. FALSIFIED BY: `presence-k64` crossing near N = 32 = `s`, the per-sequence item
+#   count — the ladder resolves that factor of 2 — or not crossing on the ladder at all.
+#   NOTE THE FLOOR, and it was a property of the engine and not of this design: N < 16 had no routed
+#   spelling on the pre-K31 engine (its readout tile, 16, had to divide N; rola pads any level width
+#   now, and extending the ladder down is a spec decision not yet taken), so the chi = 16 tier cannot show
+#   the sub-demand collapse and the chi = 64 tier is where the crossing is MEASURED. The `N*/chi`
+#   constancy claim therefore rests on one measured crossing plus one one-sided bound, and it is
+#   stated that way rather than quoted as two crossings.
+#
+# PREDICTED-2 (the resize is a RATIO, not a rung). The 16 -> 64 tier pair is a 4x resize at the same
+#   curve shape. FALSIFIED BY: a saturation N that does not move with K, which would mean the
+#   instrument reads an absolute rung of the architecture and not the demand of the data.
+#
+# PREDICTED-3 (attention's own capacity law). On the same solver-certified graphs, attention's
+#   threshold in `d_qk` is linear in log2(chi) with positive slope 1/c (log2 chi = 4, 5, 6 at
+#   K = 16, 32, 64). FALSIFIED BY: a threshold flat in log2(chi) (attention not paying for the
+#   demand), or one linear in chi itself (attention paying the way a fixed state does, which would
+#   collapse the two-axis claim into one).
+#
+# PREDICTED-4 (THE WIRINGS' ASYMMETRY — the prediction this task exists for). `pi` forces
+#   `addr_read(x) = addr_write(pi(x))`, so address agreement is no longer free, and the four arms
+#   have DIFFERENT exposures to that. Per-arm expectation, stated before the run:
+#     * `arm1` (coarse dense-READ / sparse-write): its guarantee is the READ TOUCH — a dense read
+#       touches every state, so it intersects the write support whatever the map is. EXPECTED
+#       UNCHANGED relative to its identity-cue behaviour: `N*/chi` at the same constant as on
+#       `graph_grid`'s cue-map tier.
+#     * `arm3` (level split, one sparse duty per level, opposite across levels): its guarantee is
+#       PER-LEVEL COMPLEMENTARITY — every level has a dense side, so read and write intersect level
+#       by level regardless of `pi`. EXPECTED UNCHANGED, like arm1.
+#     * `arm2` (UNION — one shared entmax support split by sigma): its guarantee is the SHARED SOLVE,
+#       i.e. read and write are drawn from ONE support, which is exactly what makes agreement free
+#       when the read cue IS the written content. Under `pi` that coincidence is gone: at position t
+#       the arm must emit the support UNION {f(x_t), f(pi(x_t))}, spending its support on two
+#       addresses instead of one. EXPECTED TO PAY: `N*/chi` strictly HIGHER for arm2 than for arm1
+#       and arm3 on this task, while the identity-cue tiers of `graph_grid` show no such gap.
+#     * `d1` (dense control, every state touched by every token): agreement is trivial and there is
+#       no structure to break. EXPECTED at the same `N*/chi` as arm1/arm3 — it is what says the
+#       wirings' thresholds are a property of the demand and not of their sparsity.
+#   FALSIFIED BY: arm2 sitting at arm1's ratio (the union's identity-cue advantage was never doing
+#   the work the theory says it does), or ALL arms shifting together (the shift is the task getting
+#   harder, not the wiring's guarantee being tested).
+#
+# PREDICTED-5 (the floor is exactly 0.5, and that is a check on the generator). The planted balance
+#   is flat in position (`presence_position_bias` stamped per segment), so a model with no working
+#   addressing scores 0.5 and NOT more: an under-capacity arm is predicted to sit AT the chance line.
+#   FALSIFIED BY: an arm at N far below chi scoring materially above 0.5, which would say the layout
+#   leaks a position- or frequency-based shortcut and the instrument, not the model, is being
+#   measured. This is the cheapest falsifier in the file and it is readable off the first tier.
+#   PARTIALLY OBSERVED ALREADY, at a toy budget (30 epochs x 8k examples, N = 32, seed 0, k16):
+#   arm1 0.506, arm3 0.506, d1 0.506, mha-dqk8 0.505 — i.e. AT the chance line and not above it,
+#   which is the prediction's shape — while arm2 reached 0.963 on the same budget. That single
+#   toy-scale draw is NOT evidence about the arms' ordering (one seed, a third of the grid's step
+#   budget, and the grid's own N ladder untouched); it is quoted only because it is the falsifier's
+#   direction and because it is the reason the attention floor above was probed at full size.
+#
+# PREDICTED-6 (THE DECAY CONTRAST — mass-proportional is the only clock compatible with spread
+#   writes). Added 2026-08-03 with the `presence_decay16` tier. Two clocks share one dial surface
+#   and differ ONLY in the exponent read off the stored write: `leaf_mass` ticks a touched leaf in
+#   proportion to its deposited mass (`keep = (1-rate)^c`, tiny leak -> tiny decay), while
+#   `inclusion_gated` (ORACLE-ONLY instrument of the V3 engine, deleted with it)
+#   ticks every leaf in the write's stored support by the fixed constant `tick`
+#   (`keep = (1-rate)^(tick * 1[c>0])`). THE MATCHING RULE: an exact point write's stored leaf mass
+#   is c in {0,1}, so at the default tick = 1.0 the clocks coincide BIT-FOR-BIT on point writes
+#   (unit-gated: `test_rola_v3_inclusion_gated_decay.py::test_matching_rule_*`) — the sparse-write
+#   arm1 is therefore the control cell, and the clocks separate only where writes spread. Three
+#   predictions, each with its falsifier:
+#     * DO-NO-HARM: `leaf_mass` sits ~at its decay-off twin on the spread arms (arm2/arm3) — the
+#       mass-proportional clock's whole design is that spread traffic ticks it negligibly.
+#       FALSIFIED BY: arm2-mass or arm3-mass materially below the same arm at decay off, which
+#       would say write-mass decay itself erodes retention under spread writes and the "compatible
+#       clock" half of the mechanism is wrong.
+#     * INCLUSION DEGRADES WITH SPREAD WIDTH: `inclusion_gated` is WORST on arm3 (the level-split
+#       wiring writes DENSE on some level, so every write full-strength-ticks that entire level's
+#       leaves — the widest support in the slate), MILDER on arm2 (the union support spans the two
+#       addresses {f(x_t), f(pi(x_t))} — spread, but narrow), and ~COINCIDENT with leaf_mass on
+#       arm1 (near-point sparse writes; the matching rule). FALSIFIED BY: inclusion ~= leaf_mass on
+#       the dense-write arm3 — gating would not matter and the "catastrophic clock" half of the
+#       mechanism is wrong — or the ordering not tracking write-support width across the arms.
+#     * THE CONTROL PAIR HOLDS: arm1-mass ~= arm1-incl. FALSIFIED BY: the pair splitting
+#       materially, which would say arm1's entmax writes are NOT near-point at trained routing and
+#       the control cell is invalid — reported as an INSTRUMENT finding (re-derive tick from the
+#       measured mean per-write stored leaf mass and re-run the pair), never silently absorbed.
+#
+# PREDICTED-7 (THE OPERATOR-CLASS LADDER — theory addendum, user + coordinator, 2026-08-14; this
+#   block records the MECHANISM behind PREDICTED-3's wall and adds the value-side capacity claim).
+#   The task's read contract is a weighted priority list ending in "then zero"; a NORMALIZED read
+#   is a simplex point, so the list cannot end — the budget must land on present tokens. With
+#   constant values the output of ANY normalized read is constant (a convex combination of 1s is
+#   1): the task is exactly impossible without VALUE DIVERSITY, and with a per-reader marker map
+#   the only value-diverse scheme a shared scalar value admits is a SINK — a dedicated null token
+#   (value 0) that absorbs the budget when nothing matches. Trained transformers discover this on
+#   their own (the attention-sink/BOS-anchoring literature): dense attention passes this task ONLY
+#   by inventing a degenerate token to fake the structural zero a sparse read has natively.
+#     * SOFTMAX (the attn arm): the absent case is a race — sink weight e^{s_sink} against L noise
+#       tokens' aggregate L*e^{s_low}; a margin of ln L wins it, and the margin budget is SHARED
+#       with marker-key separation in d_qk. PREDICTED-3's crossing IS this race's collision wall;
+#       the ladder's slope is the margin economics made visible. Additional observable: an
+#       attention arm that clears chance should show sink-like mass concentration (a token
+#       absorbing absent-case attention) in its maps; clearing chance with NO sink-like token
+#       would falsify the mechanism (not the wall).
+#     * NORMALIZED DENSE LINEAR (the D1 dense control at full support): NO exponent, so weight
+#       ratios are polynomial in scores — the sink dilutes as 1/L like every read, and no margin
+#       fixes it. In the positive orthant, small off-target crosstalk requires (near-)disjoint
+#       feature supports — which IS sparse routing; a strictly-positive dense map has a crosstalk
+#       floor. PREDICTED: the dense control sits at/near chance INDEPENDENT of N once L is large,
+#       and does not inherit attention's log2(chi) ladder. FALSIFIED BY: the dense control
+#       tracking attention's curve (it found a concentration mechanism it should not have).
+#     * SPARSE READS (arm1/arm3 by their dense-side guarantee, arm2 the hard wiring): the entmax
+#       image includes the simplex BOUNDARY (softmax's image is the interior only — strict
+#       superset, provably); the zero default is structural, no sink, no race, no margin.
+#   THE VALUE-SIDE CLAIM (the d_v codebook wall): dense attention's honest solve is
+#   retrieve-WHICH-token-then-compare, which spends d_v as an identity codebook (markers must stay
+#   separable under mixing) plus a layer of depth for the compare. PREDICTED: attention's presence
+#   accuracy carries a d_v threshold scaling with the marker inventory's separation demand, while
+#   the routed arms are ~FLAT in d_v down to small d_v (presence is answered by addressed mass,
+#   not by value codes). FALSIFIED BY: attention flat in d_v (it found a value-free encoding), or
+#   the routed arms showing the same d_v wall (their answer is secretly value-coded too). NOT YET
+#   INSTRUMENTED: needs a d_v rung on the attn_capacity column and one routed tier — a stage-2
+#   addition, costed when scheduled; recorded now so the prediction predates the measurement.
+# =============================================================================
+#
+# CELL COUNT — 192 training runs in four tiers AT STAGE 1: the 3-rate LR bracket multiplies every
+# tier x3, and the multiplier is carried honestly (stage 2 re-runs WINNERS only, so the sweep is
+# paid once, here). Arithmetic, per tier, on the squares ladders (amendment 2026-08-15):
+#   presence16        4 arms x 2 ncs x 1 condition x 3 lrs x 2 seeds          = 48
+#   presence64        4 arms x 2 ncs x 1 condition x 3 lrs x 2 seeds          = 48
+#   attn_capacity     (4 d_qk at k16 + 3 at k32 + 3 at k64) x 3 lrs x 2 seeds = 60
+#   presence_decay16  3 arms x 1 clock x 2 ncs x 1 condition x 3 lrs x 2 seeds = 36  (the learned leaf-mass clock;
+#                     the inclusion-gated clock is deleted with rola's)
+# (decay-OFF rows for the contrast are presence16's own arm1/arm2/arm3 cells — same condition, same
+# ladder, same bracket — so the off column is READ, not re-run.)
+# At the original single pinned rate this was 24 + 24 + 20 = 68, inside the brief's ~40-60 plus the
+# stated 8-cell overshoot: the THIRD attention demand (`presence-k32`, 6 base cells) and the narrow
+# k16 rung that keeps its crossing on the ladder (2 base cells). Both are still kept: a
+# packing-constant slope from two demands is refused by `mqar.analysis.graph.fit_packing_constant` by
+# design (two points define a line through themselves, which is a ratio dressed as a fit), so
+# dropping either would delete PREDICTED-3 rather than shrink it. The instrument floor costs
+# nothing extra — it is read off the WIDEST rung of the same d_qk ladder.
+#
+# SCHEDULE — re-derived from `python -m rola_bench.mqar.local_grid --dry-run` on the local card (RTX 3080 Ti) at the
+# 3-rate bracket (2026-08-03), per-cell footprint and wall clock from the measured 139 ms/step at
+# L = 128:
+#   presence16 (L = 64)   72 cells, worst-cell peak 0.65 GiB, ~17.4 h
+#   presence64 (L = 256)  72 cells, worst-cell peak 2.53 GiB, ~69.6 h
+#   attn_capacity         60 cells, worst-cell peak 3.02 GiB, ~31.9 h
+#   presence_decay16 (L = 64) 108 cells at presence16's per-cell footprint, ~26.1 h (same 139 ms/step
+#     ROUTED basis — training already runs on the fp64 oracle in EVERY cell, so the inclusion arm's
+#     oracle-only dispatch changes eval-time provenance, not the training step this estimate prices).
+# i.e. the sweep moves `presence16` from one local night to a weekend, and `presence64` (~3 days)
+# out of local-night territory toward a rental, the standing local/rental split
+# ([[local-small-rented-big]]). Two honest softeners, stated rather than banked: the 139 ms/step
+# basis is ROUTED step time — the adjudication measured MHA cells at ~7 ms/step (95 s per full
+# cell), so `attn_capacity`'s ~31.9 h estimate is an upper bound that will realize far smaller —
+# and analysis may prune stage-1 losers early per (arm, N) once the bracket's winner is clear,
+# which the staged protocol permits (winners, not losers, get more seeds). Every cell is far under
+# the 0.65 memory cap on the local card.
+#
+# LR IS SWEPT PER ARM, NOT PINNED — the house per-arm sweep, forced here by measurement rather than
+# adopted by habit: the adjudication above located a task-specific LR cliff between 1e-3 and 3e-3
+# for the attention column, so a pinned 0.003 would read the ENTIRE attn_capacity tier at chance
+# for a reason that is pure artefact — and the routed arms' only full-budget number (arm2 0.858 at
+# 3e-3) carries the same one-LR caveat, so they get the same bracket (fairness, not symmetry for
+# its own sake). STAGING, mirroring graph_grid/law_grid's staged protocol exactly: stage 1 is this
+# file — every arm runs the full `lrs` bracket at seeds [0, 1] and analysis reports the BEST cell
+# per (arm, N, condition) over the bracket; stage 2 re-runs each winner AT ITS WINNING LR at
+# further seeds via `SEED_CONFIRM_BASE=presence_grid`, which is where a published row's error bars
+# come from. The bracket [3e-4, 1e-3, 3e-3] contains both measured attention winners (1e-3, the
+# fastest, and 3e-4), and KEEPS 3e-3 — the routed arms' only measured point and the cliff's far
+# side — so the sweep re-measures the cliff rather than assuming it.
+#
+# SEEDS: 2, with stage 2 available (`SEED_CONFIRM_BASE=presence_grid`), see `single_seed_rationale`.
+project_name: rola-presence-grid
+backbone: {d_model: 128, vocab: 8192, n_layers: 2, l_max: 256}
+data:
+  # 64, matching `graph_grid.yaml`: the dominant memory term of a cell in this family is the
+  # [batch, L, vocab] logit tensor, and this grid's longest condition is L = 256. Set spec-WIDE
+  # rather than per tier — batch size is a covariate of the optimization, and a grid whose conditions
+  # differ in batch cannot attribute a difference to the data.
+  train_batch: 64
+  test_batch: 8
+  cache_dir: /tmp/zoology_cache_presence
+  protocol:
+    kind: presence_recall
+    train_examples: 20000
+    test_examples: 1000
+    # 4 tokens between key events, which EXCEEDS the hybrid backbone's short-conv kernel of 3: a read
+    # whose target sits in the immediately preceding tokens is served by the convolution and measures
+    # nothing about the state. Asserted by the generator on every pair of events, not hoped for.
+    min_separation: 4
+    # `test_seq_lens` OMITTED on purpose: every cell evaluates in-distribution at its own train
+    # length. The conditions differ in geometry (a K = 64 episode needs L >= 4*32), so one global
+    # evaluation ladder would hand some conditions a length their generator refuses.
+    # L-extrapolation is `ood_recall.yaml`'s axis.
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1]
+  early_stopping_threshold: 2.0          # never triggers — full training
+  early_stopping_metric: valid/accuracy
+  # The REALIZED demand is a slice key: a result row is keyed on the graph the model was shown.
+  slice_keys: [graph_construction, graph_demand_upper, num_kv_pairs, input_seq_len]
+  eval_every: 10
+single_seed_rationale: >
+  Two seeds, not three, and the reason travels with the file — the same staged protocol
+  `graph_grid.yaml` records. This grid runs on the LOCAL card overnight ([[local-small-rented-big]]),
+  and a third seed is a third night per tier for a variance estimate the staged protocol already
+  provides: stage 1 is this file at seeds [0, 1] over the full LR bracket, stage 2 re-runs the
+  winning cell per (arm, N) AT ITS WINNING LR at extra seeds via `SEED_CONFIRM_BASE=presence_grid`
+  (mqar/experiments/seed_confirm.py), which is where the error bars on a published row come from. No
+  row from this file is publishable at 2 seeds on its own, and PREDICTED-4 (the arm2 gap) is exactly
+  the row stage 2 must widen before it is printed.
+lrs: [0.0003, 0.001, 0.003]              # the per-arm bracket; see LR IS SWEPT PER ARM above
+ncs: [16, 64]                            # SQUARES ONLY (amendment 2026-08-15); the k64 tier overrides to bracket its chi
+seq_lens: [64]                           # default L; tiers override where the episode needs more
+conditions:
+  # chi = 16 with 8 key events per sequence: the demand and the per-sequence item count are 2x apart.
+  # L = 64 holds 8 events at min_separation 4 with room for the gaps to vary.
+  - {tag: presence-k16, demand: 16, keys_per_sequence: 8}
+  # THE THIRD DEMAND, for the attention slope only (log2 chi = 5). No routed cells: the RoLA law is
+  # read off the 16/64 pair, and a third routed tier would buy a middle point on a line the two ends
+  # already determine, at the price of another 24 cells.
+  - {tag: presence-k32, demand: 32, keys_per_sequence: 16}
+  # chi = 64 with 32 key events: the 4x resize (PREDICTED-2), at L = 256.
+  - {tag: presence-k64, demand: 64, keys_per_sequence: 32}
+tiers:
+  # T1 — THE LAW AT chi = 16. The tier to run first: it carries PREDICTED-4 and PREDICTED-5, and it
+  # is the cheapest. The ladder runs from AT the demand upward, because N < 16 had no routed spelling
+  # on the pre-K31 engine (its readout tile, 16, had to divide N) — exactly the floor `graph_grid`'s
+  # decoupling tier hits. rola pads any level width now; extending the ladder down is a spec decision
+  # not yet taken.
+  # The consequence is stated rather than papered over: this tier can show that chi = 16 IS servable
+  # at N = 16 (and how the arms differ there), but the crossing itself is below its floor and will be
+  # reported by `mqar.analysis.graph` as `above`. THE MEASURABLE CROSSING LIVES IN T2, whose ladder starts
+  # at N = 32 = chi/2 — which is why the resize tier is not optional here.
+  "presence16":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       conditions: [presence-k16]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2, conditions: [presence-k16]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3, conditions: [presence-k16]}
+    - {build: routed, instance: rola-d1-dense, tag: d1, conditions: [presence-k16]}
+  # T2 — THE RESIZE, at chi = 64. Same four arms, ladder shifted 4x so it brackets 64 from both
+  # sides. L = 256: 32 key events at min_separation 4 need 125 tokens at minimum, and the rest is gap
+  # room so the events are not forced into a near-uniform comb.
+  "presence64":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1, seq_lens: [256],
+       conditions: [presence-k64], ncs: [64, 256]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2, seq_lens: [256],
+       conditions: [presence-k64], ncs: [64, 256]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3, seq_lens: [256],
+       conditions: [presence-k64], ncs: [64, 256]}
+    - {build: routed, instance: rola-d1-dense, tag: d1, seq_lens: [256],
+       conditions: [presence-k64], ncs: [64, 256]}
+  # T3 — THE ATTENTION CAPACITY AXIS (and the instrument floor). zoology's MHA derives
+  # head_dim = d_model / num_heads, so a head WIDTH is requested as a head COUNT (d_model = 128, so
+  # d_qk = 8 asks for 16 heads) — the same mechanism `graph_grid`'s and `law_grid`'s attention
+  # ladders use, with no mixer change at all. The ladder stops at 32 because log2 chi <= 6 here: a
+  # threshold above d_qk = 32 would mean c < 0.19, far outside the packing regime the law is stated
+  # in, and the WIDEST rung is what `mqar.analysis.graph` reads the instrument floor off (it must be
+  # capacity-adequate, which 32 amply is at chi = 64). Split into three arms only because each one
+  # carries a single `seq_lens` and the conditions differ in length.
+  "attn_capacity":
+    # k16 carries an EXTRA narrow rung (d_qk = 4 = 32 heads). Reason, found by running the analysis
+    # on synthetic rows before dispatch: log2 chi = 4 is the easiest demand on the ladder, so
+    # attention is liable to be above criterion already at d_qk = 8 — which `mqar.analysis.graph` reports
+    # as `above` (no crossing), leaving the packing-constant fit with two points and refusing it.
+    # Two cells buy the third crossing the fit needs; at L = 64 the score tensor is 67 MiB.
+    - {build: attn, head_dims: [4, 8, 16, 32], conditions: [presence-k16]}
+    - {build: attn, head_dims: [8, 16, 32], conditions: [presence-k32], seq_lens: [128]}
+    - {build: attn, head_dims: [8, 16, 32], conditions: [presence-k64], seq_lens: [256]}
+  # T4 — THE DECAY CONTRAST at chi = 16 (PREDICTED-6). Paired one-for-one on the spread wirings plus
+  # the arm1 point-write control; the decay-OFF column is T1's own arm1/arm2/arm3 rows (identical
+  # condition, ladder and bracket), read rather than re-run. ENGINE PROVENANCE, stated per cell
+  # class: every cell in this file TRAINS on the fp64 oracle (`naive_rola_v3` — the layer's
+  # training-mode dispatch is structurally oracle-only), and the `*-incl` cells additionally EVAL on
+  # it: `decay='inclusion_gated'` is the oracle-only contrast clock (fixed per-inclusion exponent,
+  # `decay_inclusion_tick` default 1.0 = the point-write matching value; the layer pins its dispatch
+  # to the oracle and the CUDA consumer refuses the config by type). The `*-mass` cells eval on the
+  # CUDA consumer like every other decay='leaf_mass' cell. d1 stays out: a dense-WRITE arm under the
+  # inclusion clock is total decay of everything every step — a foregone cell that would spend 36
+  # runs demonstrating the exponent's sign, and its wiring point is already carried by arm3's dense
+  # write level.
+  "presence_decay16":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1-mass, decay: {source: learned},
+       conditions: [presence-k16]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2-mass, decay: {source: learned},
+       conditions: [presence-k16]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3-mass, decay: {source: learned},
+       conditions: [presence-k16]}
+fleet:
+  env: {GRID_TIERS: "presence16"}        # LOCAL grid; this block only records the default tier

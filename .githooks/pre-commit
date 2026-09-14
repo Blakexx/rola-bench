@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# rola-bench's commit gate, in the tree: `core.hooksPath` points a checkout here (per worktree), so the gate is a
+# property of the checked-out files. It runs pre-commit against .pre-commit-config.yaml and refuses when pre-commit is
+# missing -- an absent gate that says nothing is indistinguishable from one that passed.
+set -euo pipefail
+if ! command -v pre-commit >/dev/null 2>&1; then
+  echo "pre-commit hook: refusing -- 'pre-commit' is not on PATH (pip install pre-commit)." >&2
+  exit 1
+fi
+exec pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=pre-commit \
+  --hook-dir "$(cd "$(dirname "$0")" && pwd)" -- "$@"

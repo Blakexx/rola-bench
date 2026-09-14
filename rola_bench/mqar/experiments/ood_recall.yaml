@@ -1,0 +1,75 @@
+# OOD-RECALL — the purpose-built LENGTH-EXTRAPOLATION confirmatory experiment.
+# RESURRECTED and re-specced 2026-08-02 (Phase 1.4). The pre-V3 version of this file was specced and
+# NEVER RUN; it also could not have answered its own question, because the `ext` preset it used ties
+# item count to sequence length (kv grows with L), so a "does the margin widen out of distribution"
+# curve confounded MORE ITEMS with LONGER SEQUENCES.
+#
+#   python -m rola_bench.fleet mqar ood_recall
+#
+# THE DESIGN, in one line: hold the ITEM/LENGTH RATIO fixed and sweep ABSOLUTE test length.
+# Symbols: L = sequence length; kv = num_kv_pairs (items); N = addressable states per head (`nc`).
+#
+#   train:  L = 256, kv = 32                         (ratio 1/8)
+#   test:   L = 256, 512, 1024, 2048, 4096
+#           kv =  32,  64,  128,  256,  512          (ratio 1/8 at EVERY length)
+#
+# Because the ratio never moves, any change in accuracy across that curve is an ABSOLUTE-LENGTH
+# effect — exactly the quantity the extrapolation claim is about, and exactly what the old spec could
+# not isolate. The in-distribution anchor is the L=256 point (the trained length); every longer point
+# is out of distribution by a stated factor (2x, 4x, 8x, 16x).
+#
+# A second, matched ladder at FIXED ITEM COUNT (kv held at 32 across all lengths) is evaluated
+# alongside it. Together the two ladders separate the two hypotheses: fixed-RATIO degradation is a
+# capacity story; fixed-ITEM degradation at growing L is a positional / scale-freeness story. The
+# retrospective's H3 (loss of scale-freeness under a delta rule) predicts the SECOND ladder is where
+# GDN falls off, and predicts it shape-dependently — hence both GDN shapes below.
+#
+# CONTENDERS: the full taxonomy ladder plus all three RoLA wirings and the D1 dense control. GDN runs
+# BOTH `wide` (keys-only growth) and `square`; its extrapolation fragility was shape-dependent in the
+# pilot and the shape covariate must be carried. GDN-wide's head_dim <= 256 kernel cap bounds it at
+# N = 256; higher rungs are omitted with a printed reason (a cost column, not missing data).
+#
+# ADVANCE PREDICTION FRAME (recorded before the run, per the retrospective): collapse is predicted
+# WITHIN the normalized / map-matched class, with normalization measured as the first-order channel.
+# GDN's in-distribution erasure edge did NOT reproduce in the pilot; it is carried here as an OPEN
+# OBSERVATION with no claim in either direction.
+project_name: rola-ood-recall
+backbone: {d_model: 128, vocab: 8192, n_layers: 2, l_max: 4096}
+data:
+  train_batch: 128
+  test_batch: 8
+  cache_dir: /tmp/zoology_cache_ood
+  protocol:
+    train_kv: [32]                       # ratio 1/8 at the single train length L=256
+    train_examples: 100000
+    test_seq_lens: [256, 512, 1024, 2048, 4096]
+    test_examples: 1000
+    test_kv_by_len:                      # kv = L/8 (fixed RATIO) and kv = 32 (fixed ITEMS)
+      256:  [32]
+      512:  [64, 32]
+      1024: [128, 32]
+      2048: [256, 32]
+      4096: [512, 32]
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1, 2]                       # >= 3 seeds; the curve's shape is the claim
+  early_stopping_threshold: 2.0          # never triggers — full training
+  early_stopping_metric: valid/accuracy
+  slice_keys: [num_kv_pairs, input_seq_len]   # BOTH axes sliced — that is the unconfounding
+  eval_every: 10
+lrs: [0.003, 0.01, 0.03]
+ncs: [64, 256]                           # two healthy state rungs
+seq_lens: [256]                          # single TRAIN length; the sweep is at TEST time
+tiers:
+  "rola":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1}
+    - {build: routed, instance: rola-arm2-union,                tag: arm2}
+    - {build: routed, instance: rola-arm3-levelsplit,           tag: arm3}
+    - {build: routed, instance: rola-d1-dense,                  tag: d1}
+  "contenders":
+    - {build: baselines, methods: [rla, gla, gdn], shapes: [wide, square]}
+  "attn":
+    - {build: attn}
+fleet:
+  env: {GRID_TIERS: "rola"}

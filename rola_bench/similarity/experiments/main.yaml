@@ -1,0 +1,10 @@
+# Similarity-matrix eval: best-accuracy checkpoint per (kernel, nc-rung) from the MQAR store.
+# Data-driven work-list (rungs select which cells); the runner scores each model's similarity matrix.
+rungs: "16,64,256"
+rank_frac: 0.25                  # fraction of each MQAR test slice's examples to score
+grid_tiers: all                  # every cell's config must be reconstructable
+fleet:
+  idle_timeout: 900
+  batch: 1                       # one ckpt per POST body (~42MB base64)
+  per_batch_timeout: 3600
+  post_timeout: 1800

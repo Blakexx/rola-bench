@@ -1,0 +1,15 @@
+wandb/
+*.log
+*.pt          # NEVER check in model files (checkpoints live off the repository's disk: ROLA_BENCH_CKPTS, ROLA_LM_CKPTS)
+# Results are stored through rola_results, in the rola-results repository; nothing here is a result.
+# FLEET OPS STATE: runtime/<bench>-<config>/ holds operational churn (bad_hosts blocklists, host state). Never
+# scientific output; always ignored.
+runtime/
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+# external LM harness (on shelf) — kept locally, add as submodule when LM goes live
+rola_bench/lm/flame/

@@ -1,0 +1,32 @@
+# ROUTER-BIAS ablation: does a router bias (a content-independent default state) earn its place?
+# RE-PINNED 2026-08-02 (Phase 1.5). The axis is LIVE — `router_bias` is a real V3 layer kwarg and
+# every published RoLA cell (`rola_bench.models.rola.Cell`) pins it True, which until now was an UNTESTED pin. The
+# pre-V3 arm (`rola-rla-kappa-asym`) is retired; the ablation is re-run on the flagship wiring.
+#
+#   python -m rola_bench.fleet mqar router_bias
+#
+# Paired cells: identical preset, identical N, identical LR, `router_bias` False vs True, three
+# seeds. The pairing is what makes it an ablation — nothing else moves. Run on ARM 1 (the flagship
+# wiring) and on the D1 dense control, because a bias on a single dense level and a bias on a
+# factorized router are different objects: the first is one default state, the second is a default
+# BRANCH at every level.
+project_name: canonical-mqar-grid
+backbone: {d_model: 128, vocab: 8192, n_layers: 2, l_max: 4096}
+data:     {preset: ext, train_batch: 128, test_batch: 8, cache_dir: /tmp/zoology_cache_rwext}
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1, 2]
+  early_stopping_threshold: 2.0
+  early_stopping_metric: valid/accuracy
+  slice_keys: [num_kv_pairs, input_seq_len]
+  eval_every: 10
+lrs: [0.003, 0.01]
+ncs: [128]
+tiers:
+  all:
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1bias0, router_bias: false}
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1bias1, router_bias: true}
+    - {build: routed, instance: rola-d1-dense, tag: d1bias0, router_bias: false}
+    - {build: routed, instance: rola-d1-dense, tag: d1bias1, router_bias: true}
+fleet: {batch: 1, per_batch_timeout: 18000}

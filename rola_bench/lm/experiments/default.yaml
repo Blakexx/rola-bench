@@ -1,0 +1,26 @@
+# LM benchmark: the iso-backbone RoLA-vs-baselines comparison. Arms x seeds on one shared backbone and budget; every
+# knob the runner reads is here (flattened to the box's LM_* environment by rola_bench.lm.job).
+arms:  [rola-base-rla, rola-base-union-global, rola-base-levelsplit-global, rola-base-levelsplit-a2w-global,
+        rola-base-massdecay-global, gdn, gla, attn]
+seeds: [1337, 2024]
+backbone: {hidden: 512, layers: 12, max_pos: 2048}
+geometry: {rola_nh: 8, rola_dv: 128, attn_heads: 8, gdn_nh: 8, gdn_head_dim: 128, gdn_expand_v: 1.0,
+           gla_nh: 8, gla_ek: 2.0, gla_ev: 2.0, qk_norm: true}
+budget:
+  lr: 3e-4
+  max_steps: 20000
+  block_size: 2048
+  batch_size: 8
+  grad_accum: 4
+  dataset: fineweb-edu
+  dataset_config: sample-10BT
+  grad_ckpt: 0
+  save_steps: 500
+fleet:
+  image: blakeresearch/rola-lm:v3
+  idle_timeout: 1800
+  batch: 1                       # one arm x seed per box (a full LM training)
+  per_batch_timeout: 43200       # 12h; under no_kill a longer run keeps going
+  no_kill: true                  # pause and reattach, never destroy live work
+  pull_in_progress: true         # preemption-safe in-progress checkpoint pulls
+  live_pull_every: 900

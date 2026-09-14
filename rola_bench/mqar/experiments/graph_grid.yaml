@@ -1,0 +1,361 @@
+# THE GRAPH GRID — recall against the CO-OCCURRENCE GRAPH, not against the item count.
+# Built 2026-08-02. Data generator: `zoology.data.graph_recall` (construction -> graph table in its
+# module docstring). Runs LOCALLY, one tier per night:
+#
+#   GRID_TIERS=decoupling flock /tmp/rola_gpu.lock \
+#       python -m rola_bench.mqar.local_grid --config graph_grid          # add --dry-run first
+#
+# ------------------------------------------------------------------------------------------------
+# WHAT THIS GRID IS FOR
+# ------------------------------------------------------------------------------------------------
+# SYMBOLS, defined here at first use. `chi` = the DEMAND: the chromatic number of the co-occurrence
+# graph the sequence distribution realizes (nodes = key items, edge = some sequence forces both to
+# be separately retrievable at once). `|V|` = realized node count. `N` = addressable RoLA states per
+# head (`nc`). `L` = sequence length. `k` = keys one sequence forces apart. `m` = keys per cluster /
+# per birth slot. `w` = maximum simultaneously live keys. `B` = lifetimes started per sequence.
+# `Lg` = long-lived slots (the mixed-lifetime cell). `kv` = written items per sequence.
+#
+# THE CLAIM UNDER TEST: what a fixed-state recall model must pay for is `chi`, not `kv`. Every
+# existing grid confounds the two, because MQAR's items all co-occur — its graph is K_kv, so
+# chi = kv identically and no cell in `law_grid.yaml` or `ood_recall.yaml` can separate them. Each
+# construction here breaks the identity in a different direction:
+#
+#   `complete(k)`        chi = k = kv, |V| = k          the MQAR regime, with its graph made explicit
+#   `clustered(k, m)`    chi = k = kv, |V| = k*m        same demand and same item count over 8x the
+#                                                       key vocabulary — isolates |V| from chi
+#   `overlap(w, B, Lg)`  chi = w,  kv = B,  |V| = B*m   B items pass through a width-w window:
+#                                                       demand BELOW item count, the sharpest split
+#   `reuse(pool, k, a)`  chi emergent (BOUNDS), kv = k  Zipf sharing: demand far ABOVE item count
+#
+# THE DEMAND OF A CELL IS MEASURED, NEVER ASSUMED. Every segment computes its own realized union
+# graph and stamps `graph_nodes / graph_edges / graph_demand_lower / graph_demand_upper /
+# graph_demand_exact / graph_demand_nominal / graph_construction` into its slices; `slice_keys`
+# names them, so each result row is keyed on the demand the model was actually shown. The union of
+# the sampled patches is a SUBGRAPH of the target — `clustered` only realizes a cross-cluster edge
+# when some sequence draws both endpoints — so a knob-derived x-axis would report a graph that was
+# never presented. Same rule as the capacity coordinate (`realized_state`), for the same reason.
+#
+# ARMS — the three canonical wirings plus the D1 DENSE CONTROL, and an ATTENTION REFERENCE COLUMN.
+# Theory-licensed trim: the fixed-state class baselines (rla / gla / gdn) are established on the
+# standard law grid at this exact backbone, no claim in this file is about them, and adding them
+# would triple a local overnight tier to re-measure a known row. They stay out.
+#
+# THE ATTENTION COLUMN IS A REFERENCE, NOT A CONTENDER, and it is labelled that way everywhere (tier
+# `attn_reference`, run_ids `grid-mha-*`, and the analysis reports it as the INSTRUMENT FLOOR rather
+# than as a row on the capacity ladder). Softmax attention has no rung on the state axis at all — its
+# state is a growing KV cache — so it cannot be plotted against N and is not being ranked against
+# anything. Its job is to establish that each family's cells are SOLVABLE: the theory says attention
+# serves every one of these graphs at N = L, so an attention score near ceiling says a routed arm's
+# failure at some N is a capacity result, and an attention score far from ceiling says the generator
+# made that family too hard and the cell is measuring difficulty, not demand. That calibration is
+# what a referee needs and no routed arm can supply it. It runs at a FEW capacity-adequate cells per
+# family (10 in total, one condition-set per sequence length), never the N sweep.
+#
+# ATTENTION IS ALSO THE SECOND VALIDATION ARM, on its OWN capacity axis (tier `attn_capacity`). Its
+# capacity law is not linear in a state count: one head packs ~exp(c * d_qk) addresses, so its
+# collapse threshold sits at d_qk* ~ log(chi) / c. Sweeping the per-head key width d_qk over the same
+# solver-certified graphs turns the packing constant c into a MEASUREMENT — the paper's fit-c
+# instrument, running on certified demand rather than on an assumed one. The two axes together are
+# the headline: RoLA's threshold linear in N against chi, attention's linear in d_qk against
+# log2(chi), on the same graphs.
+#
+# ============================ ADVANCE PREDICTIONS ============================
+# Recorded BEFORE the run, per the retrospective's rule; each names what would falsify it.
+#
+# PREDICTED-1 (the demand, not the vocabulary). `clustered(16, m=8)` (chi = 16, |V| = 128) tracks
+#   `complete(16)` (chi = 16, |V| = 16) at every N, despite eight times the key vocabulary and eight
+#   times the number of distinct bindings the model must be ready to serve. FALSIFIED BY: a
+#   systematic gap between the two at matched N, which would say the cost is carried by |V| (an
+#   embedding/addressing-resolution effect) and not by the graph.
+#
+# PREDICTED-2 (the demand, not the item count). `overlap(w=16, B=32)` writes 32 items per sequence
+#   but never needs more than 16 apart, and is PREDICTED to sit at `complete(16)`'s level rather than
+#   at `complete(32)`'s — i.e. the N at which it saturates is set by w, not by B. FALSIFIED BY:
+#   saturation tracking B. This is the file's most discriminating cell, because the item-count
+#   account and the graph account make opposite predictions about it.
+#
+# PREDICTED-3 (the resize). `complete(64)` needs 4x the N that `complete(16)` needs, at the same
+#   shape of curve. This is the sanity check that the instrument measures a RATIO (N vs chi) and not
+#   an absolute rung. FALSIFIED BY: a saturation N that does not move with k.
+#
+# PREDICTED-4 (the mixed-lifetime cell and the decay clock). At `overlap-w16-mixed`, `Lg = 4` keys
+#   are written once at the start and asked for at the very end with nothing re-touching them, while
+#   the rest churn. A WRITE-MASS clock (`decay='leaf_mass'`) preserves those slots, because no
+#   further mass lands on them; PREDICTED no loss on the long-lived items relative to
+#   `decay='none'`, and a GAIN on the churn items (the retired lifetimes stop competing for the
+#   state). FALSIFIED BY: the mass-decay arm losing the long-lived items — which would mean the
+#   clock is not the write-mass clock it is documented to be.
+#   *** THE THIRD DECAY RUNG DOES NOT EXIST, AND THAT IS A REPORTED FACT. *** The design calls for a
+#   TIME-PROXY clock alongside the write-mass one, and this cell is exactly what separates them (a
+#   time clock erodes the long-lived items, a write-mass clock does not). rola's decay slot feeds a
+#   write-conditioned clock only (`rola/routing/decay.py`: a source that decayed on time "would be a
+#   different recurrence, and it is vetoed as one"), and fla's decay sources are `constant` and
+#   `learned`, both rates on that clock. So the cell is built and run at the rungs that exist, and the
+#   comparison it was designed for has no spelling. Not substituted, not silently dropped.
+#
+# PREDICTED-5 (the natural-distribution proxy). `reuse` (pool 512, Zipf a = 1.5, k = 16 per
+#   sequence) MEASURES chi in [124, 126] at 20k train examples — an order of magnitude above its item
+#   count. PREDICTED: it saturates near N ~ 128, i.e. with the measured demand and not with kv = 16.
+#   FALSIFIED BY: saturation at N ~ 16. Note the demand of this construction GROWS with the number of
+#   sampled sequences (more sequences realize more of the Zipf tail's co-occurrences), so its train
+#   and test segments carry different stamps and both are reported; that is a property of natural
+#   reuse, not an artefact.
+# PREDICTED-8 (the CONTRACT, not the distribution). `complete-k64-contract50` presents exactly the
+#   distribution `complete-k64` does and asks about half of its items on both sides (train targets
+#   drawn from the covered half, eval exhaustive over it). A point lookup demands separation
+#   node-wise, so the demanded-apart graph is K_32 joined to an independent 32 and its SOLVED chi is
+#   33. PREDICTED: the threshold moves 64 -> 33 even though not one token of the distribution
+#   changed. The CONTROL `complete-k64-sampled25` asks the same NUMBER of questions per sequence
+#   (16 of 64) but re-draws them uniformly each time, so every pair is demanded apart by some
+#   sequence, the solved chi stays 64, and PREDICTED its threshold does NOT move. Together they say
+#   the axis is the demanded-apart relation and not the query BUDGET. FALSIFIED BY: the two moving
+#   together, in either direction.
+#
+# PREDICTED-9 (attention's own capacity law). On the same graphs, attention's threshold in d_qk is
+#   PREDICTED linear in log2(chi) with a positive slope 1/c: chi = 16, 33, 64 give log2 chi = 4.0,
+#   5.04, 6.0, and the fitted slope IS the packing constant's reciprocal. FALSIFIED BY: a threshold
+#   that is flat in log2(chi) (attention not paying for the demand), or one linear in chi itself
+#   (attention paying the same way a fixed state does, which would collapse the two-axis claim).
+# PREDICTED-10 (the cue map is not a capacity cost). `complete-k16-pi` and `clustered-k16-m8-pi`
+#   present the same distribution and the same storage demand as their identity twins; only the
+#   addressing map changes, from "the cue IS the key" to a frozen random permutation. Every value
+#   must still be separately retrievable, so the solved chi is 16 either way. PREDICTED: the
+#   threshold does NOT move; what may move is the epochs to reach it (the map has to be learned).
+#   FALSIFIED BY: a threshold shift, which would mean a routed arm is paying for the identity cue —
+#   i.e. that the earlier cells were measuring an easy addressing coincidence and not storage.
+# =============================================================================
+#
+# CELL COUNT — 302 training runs, tiered into overnight units. Arithmetic, per tier:
+#   decoupling  4 arms x 3 ncs x 2 conditions x 1 lr x 2 seeds = 48, less the 3 D=2 wirings at N=32 (12)  = 36
+#   resize      4 arms x 5 ncs x 1 condition  x 1 lr x 2 seeds = 40, less D=2 at N=32 and N=128 (12)  = 28
+#   overlap     4 arms x 2 ncs x 2 conditions x 1 lr x 2 seeds = 32
+#   decay       4 arms x 2 ncs x 2 conditions x 1 lr x 2 seeds = 32   (the same arms at leaf_mass)
+#   reuse       4 arms x 4 ncs x 1 condition  x 1 lr x 2 seeds = 32, less D=2 at N=32 and N=128 (12)  = 20
+#   contract    4 arms x 3 ncs x 2 conditions x 1 lr x 2 seeds = 48, less the 3 D=2 wirings at N=32 (12)  = 36
+#   attn_reference                  5 conditions x 1 lr x 2 seeds = 10   (the instrument floor)
+#   attn_capacity  (4 d_qk x 2 conds + 3 d_qk x 2 conds) x 1 lr x 2 seeds = 28   (the 2nd axis)
+#   cue_map     4 arms x 2 ncs x 2 conditions x 1 lr x 2 seeds = 32
+# The brief for this instrument asked for 30-50 cells total; that is the size of ONE tier, and the
+# axes it also asked for (4 constructions + a resize + a mixed-lifetime cell + a decay axis, each
+# against 4 arms and an N ladder at 2 seeds) cannot be spent in under ~200 runs. The axes were kept
+# and the schedule was tiered rather than the design being trimmed to fit the number; `GRID_TIERS`
+# selects one night's worth, which is the existing house mechanism.
+#
+# SCHEDULE — MEASURED, not assumed, and it contradicts the "one tier per night" plan for half the
+# tiers. A cell is 12520 optimizer steps (20k examples / batch 64 x 40 epochs) and the local card
+# (RTX 3080 Ti) runs 139 ms/step at L = 128, measured 2026-08-02 -> 29 min/cell at L = 128 and ~4x
+# that at L = 512. `python -m rola_bench.mqar.local_grid --dry-run` prints the per-tier total; as it stands:
+#     decoupling 23.2 h | reuse 15.5 h | cue_map 15.5 h        <- LOCAL: one long night each
+#     overlap 30.9 h | decay 30.9 h | attn_capacity 30.9 h     <- LOCAL only over two nights
+#     resize 77.3 h | contract 92.8 h | attn_reference 8.7 h   <- RENTAL class (L = 512)
+# This is the standing local/rental split ([[local-small-rented-big]]), stated per tier rather than
+# discovered at 3 am. `decoupling` is the tier that is ready to start locally tonight. The lever, if
+# a tier must be compressed to fit a night, is `data.protocol.train_examples` (halving it halves the
+# step count and the wall clock) — stated here as a decision for the operator, and NOT taken
+# unilaterally, because 20k examples is the law-tier protocol every other MQAR spec trains on and
+# changing it would make this grid's accuracies incomparable with theirs.
+#
+# LR IS PINNED, NOT SWEPT (0.003, the middle of law_grid's bracket at this exact backbone and scale).
+# Sweeping 4 LRs would quadruple every tier for a calibration `law_grid.yaml` already owns. STATED
+# RISK: a cell that does not train at 0.003 is an LR artefact until re-run; the fix is to edit `lrs:`
+# and re-dispatch that tier, not to read a null result.
+#
+# SEEDS: 2, with stage 2 available (`SEED_CONFIRM_BASE=graph_grid`), see `single_seed_rationale`.
+project_name: rola-graph-grid
+backbone: {d_model: 128, vocab: 8192, n_layers: 2, l_max: 512}
+data:
+  # 64, not law_grid's 128, and the reason is MEASURED rather than aesthetic: the dominant memory
+  # term of an MQAR-family cell is the [batch, L, vocab] logit tensor, and at batch 128 the
+  # `complete-k64` condition (L = 512) needs ~9 GiB, which the local card's 0.65 cap (7.8 GiB of
+  # 12 GiB) refuses — the smoke OOM'd on exactly that cell. Halving the batch halves that term. It
+  # is set spec-WIDE rather than per-tier because batch size is a covariate of the optimization, and
+  # a grid whose conditions differ in batch cannot attribute a difference to the graph. The
+  # consequence is stated: this grid's batch differs from `law_grid.yaml`'s, so absolute accuracies
+  # are comparable WITHIN this file and not across files.
+  train_batch: 64
+  test_batch: 8
+  cache_dir: /tmp/zoology_cache_graph
+  protocol:
+    kind: graph_recall
+    train_examples: 20000
+    test_examples: 1000
+    power_a: 0.01                        # query-gap law, identical to MQAR's, so gap statistics
+    # `test_seq_lens` OMITTED on purpose: every cell evaluates in-distribution at its own train
+    # length. The conditions differ in geometry (a complete(64) episode needs L >= 256), so one
+    # global evaluation ladder would hand some conditions a length their generator refuses.
+    # L-extrapolation is `ood_recall.yaml`'s axis.
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1]
+  early_stopping_threshold: 2.0          # never triggers — full training
+  early_stopping_metric: valid/accuracy
+  # The REALIZED demand is a slice key: a result row is keyed on the graph the model was shown.
+  slice_keys: [graph_construction, graph_demand_upper, num_kv_pairs, input_seq_len]
+  eval_every: 10
+single_seed_rationale: >
+  Two seeds, not three, and the reason travels with the file. This grid runs on the LOCAL card
+  overnight ([[local-small-rented-big]]), one tier per night, and a third seed is a third night per
+  tier for a variance estimate the STAGED protocol already provides: stage 1 is this file at seeds
+  [0, 1], stage 2 re-runs the winning cell per (arm, N) at extra seeds via
+  `SEED_CONFIRM_BASE=graph_grid` (mqar/experiments/seed_confirm.py), which is where the error bars on
+  a published row come from. No row from this file is publishable at 2 seeds on its own, and the
+  first tier's spread between seeds 0 and 1 is what decides whether stage 2 needs to be wider.
+lrs: [0.003]
+ncs: [16, 32, 64]                        # default N ladder; tiers override to bracket their demand
+seq_lens: [128]                          # default L; tiers override where the episode needs more
+conditions:
+  # --- the MQAR regime, with its graph stated. chi = k = kv, |V| = k.
+  - {tag: complete-k16, construction: complete, demand: 16}
+  - {tag: complete-k64, construction: complete, demand: 64}
+  # --- same demand and same item count, 8x the key vocabulary (PREDICTED-1).
+  - {tag: clustered-k16-m8, construction: clustered, demand: 16, keys_per_class: 8}
+  # --- 32 items through a width-16 window: demand BELOW item count (PREDICTED-2). keys_per_class=2
+  #     blows each birth slot up to 2 keys, which raises |V| to 64 and leaves chi at 16.
+  - {tag: overlap-w16-uniform, construction: overlap, demand: 16, births: 32, keys_per_class: 2}
+  # --- the MIXED-lifetime cell: 4 slots written once at the start and queried at the very end, the
+  #     other 28 churning through a width-12 window. Max simultaneous liveness is still 16.
+  - {tag: overlap-w16-mixed, construction: overlap, demand: 16, births: 32, keys_per_class: 2,
+     long_lived: 4}
+  # --- the natural-distribution proxy: measured chi ~ 125 at kv = 16 (PREDICTED-5).
+  - {tag: reuse-zipf, construction: reuse, demand: 16, pool_size: 512, zipf_a: 1.5}
+  # --- THE CONTRACT AXIS (PREDICTED-8). Same DISTRIBUTION as `complete-k64`, reduced CONTRACT: only
+  #     the first half / quarter of the items is ever queried, on both sides (train targets are drawn
+  #     from the covered set, eval is exhaustive over it). A point lookup demands separation
+  #     node-wise, so the demanded-apart graph is K_cov joined to an independent rest and its solved
+  #     chi is cov + 1 = 33 — SOLVED and stamped, never assumed.
+  - {tag: complete-k64-contract50, construction: complete, demand: 64, contract_fraction: 0.5}
+  # --- the CONTROL for that pair: the same NUMBER of queries per training sequence (16 of 64), but
+  #     drawn uniformly per sequence instead of from a fixed covered set. Every pair is still
+  #     demanded apart by SOME sequence, so the union contract graph — and the solved chi — is the
+  #     full 64. Two ways to "query a quarter of the items", one of which reduces the demand and one
+  #     of which does not, and the stamp says which is which before a single cell is trained.
+  - {tag: complete-k64-sampled25, construction: complete, demand: 64, queries_per_sequence: 16}
+  # --- THE CUE MAP (PREDICTED-10). Identical distribution and identical STORAGE demand to
+  #     `complete-k16` / `clustered-k16-m8`; the only change is that a query presenting cue u must
+  #     answer with the value of item pi(u), for a permutation pi frozen once per cell (never keyed
+  #     off the segment seed, so train and eval share it). Every value must still be separately
+  #     retrievable, so chi is unchanged at 16 — what moves is the ADDRESSING map the router must
+  #     learn, and nothing else.
+  - {tag: complete-k16-pi, construction: complete, demand: 16, cue_permutation: true}
+  - {tag: clustered-k16-m8-pi, construction: clustered, demand: 16, keys_per_class: 8,
+     cue_permutation: true}
+tiers:
+  # T1 — THE DECOUPLING CONTRAST. The one tier to run first: it is the file's primary claim and it is
+  # the cheapest. N brackets chi = 16 from at-demand upward. The ladder starts at 16, which was the
+  # pre-K31 engine's routed floor (its readout tile, 16, had to divide N), exactly as in law_grid.
+  # rola pads any level width now, so a rung below 16 is spellable; extending the ladder down is a
+  # spec decision not yet taken.
+  "decoupling":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       conditions: [complete-k16, clustered-k16-m8]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2,
+       conditions: [complete-k16, clustered-k16-m8]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3,
+       conditions: [complete-k16, clustered-k16-m8]}
+    - {build: routed, instance: rola-d1-dense, tag: d1,
+       conditions: [complete-k16, clustered-k16-m8]}
+  # T2 — THE RESIZE. chi = 64, so the ladder brackets it from BOTH sides (16, 32 below; 128, 256
+  # above). L = 512: 64 writes + 64 queries = 128 events of 2 tokens, plus gap room.
+  "resize":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       conditions: [complete-k64], ncs: [16, 32, 64, 128, 256], seq_lens: [512]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2,
+       conditions: [complete-k64], ncs: [16, 32, 64, 128, 256], seq_lens: [512]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3,
+       conditions: [complete-k64], ncs: [16, 32, 64, 128, 256], seq_lens: [512]}
+    - {build: routed, instance: rola-d1-dense, tag: d1,
+       conditions: [complete-k64], ncs: [16, 32, 64, 128, 256], seq_lens: [512]}
+  # T3 — THE LIFETIME FAMILY at decay OFF. N = 16 (at the demand) and 64 (4x it): the question is
+  # whether saturation follows w = 16 or B = 32, and two rungs answer it.
+  "overlap":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2,
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3,
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+    - {build: routed, instance: rola-d1-dense, tag: d1,
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+  # T4 — THE DECAY AXIS: the SAME cells at the write-mass clock. Paired one-for-one with `overlap`,
+  # so the arm tag is the only thing that differs in the run_id. The third rung (a time clock) has no
+  # V3 spelling — see PREDICTED-4.
+  "decay":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1-mass, decay: {source: learned},
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2-mass, decay: {source: learned},
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3-mass, decay: {source: learned},
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+    - {build: routed, instance: rola-d1-dense, tag: d1-mass, decay: {source: learned},
+       conditions: [overlap-w16-uniform, overlap-w16-mixed], ncs: [16, 64], seq_lens: [256]}
+  # T5 — THE NATURAL-DISTRIBUTION PROXY. The ladder brackets the MEASURED demand (~125), not the
+  # item count (16) — which is the whole prediction.
+  "reuse":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       conditions: [reuse-zipf], ncs: [32, 64, 128, 256]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2,
+       conditions: [reuse-zipf], ncs: [32, 64, 128, 256]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3,
+       conditions: [reuse-zipf], ncs: [32, 64, 128, 256]}
+    - {build: routed, instance: rola-d1-dense, tag: d1,
+       conditions: [reuse-zipf], ncs: [32, 64, 128, 256]}
+  # T6 — THE CONTRACT AXIS. Same distribution as `resize` (complete(64) at L = 512), reduced
+  # contract, so the comparison row is already in the grid. The N ladder brackets the two induced
+  # demands (33 and 17) and the control's full 64.
+  "contract":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1, seq_lens: [512],
+       conditions: [complete-k64-contract50, complete-k64-sampled25], ncs: [16, 32, 64]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2, seq_lens: [512],
+       conditions: [complete-k64-contract50, complete-k64-sampled25], ncs: [16, 32, 64]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3, seq_lens: [512],
+       conditions: [complete-k64-contract50, complete-k64-sampled25], ncs: [16, 32, 64]}
+    - {build: routed, instance: rola-d1-dense, tag: d1, seq_lens: [512],
+       conditions: [complete-k64-contract50, complete-k64-sampled25], ncs: [16, 32, 64]}
+  # T9 — THE CUE MAP. Same graphs as `decoupling`, non-identity cue. Two N rungs (at the demand and
+  # 4x it) rather than three: the question is whether a frozen non-identity map costs CAPACITY, which
+  # a shift of the threshold between 16 and 64 answers, not the shape of the curve between them.
+  "cue_map":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1,
+       conditions: [complete-k16-pi, clustered-k16-m8-pi], ncs: [16, 64]}
+    - {build: routed, instance: rola-arm2-union, tag: arm2,
+       conditions: [complete-k16-pi, clustered-k16-m8-pi], ncs: [16, 64]}
+    - {build: routed, instance: rola-arm3-levelsplit, tag: arm3,
+       conditions: [complete-k16-pi, clustered-k16-m8-pi], ncs: [16, 64]}
+    - {build: routed, instance: rola-d1-dense, tag: d1,
+       conditions: [complete-k16-pi, clustered-k16-m8-pi], ncs: [16, 64]}
+  # T7 — THE ATTENTION REFERENCE / INSTRUMENT FLOOR. One capacity-adequate cell per family: softmax
+  # attention at the stock zoology geometry (d_model / 2 heads, i.e. d_qk = 64), which is ample here.
+  # Split into four arms only because a single arm carries one `seq_lens`, and the families differ in
+  # sequence length. `overlap-w16-uniform` is deliberately not run: it is `overlap-w16-mixed` with an
+  # easier lifetime profile (nothing must survive to the end of the sequence), so the harder of the
+  # pair is the one that establishes the family's floor.
+  "attn_reference":
+    - {build: attn, conditions: [complete-k16, clustered-k16-m8]}
+    - {build: attn, conditions: [complete-k64], seq_lens: [512]}
+    - {build: attn, conditions: [overlap-w16-mixed], seq_lens: [256]}
+    - {build: attn, conditions: [reuse-zipf]}
+  # T8 — THE ATTENTION CAPACITY AXIS: the SECOND validation arm. Attention's capacity law is not
+  # linear in a state count — a head packs ~exp(c * d_qk) addresses, so its collapse threshold sits
+  # at d_qk* ~ log(chi) / c. This tier sweeps the per-head key width d_qk over the same
+  # solver-certified graphs the routed arms run on, at three distinct demands (chi = 16, 33, 64 =>
+  # log2 chi = 4.0, 5.04, 6.0), which makes the fitted slope 1/c a measurement rather than a citation.
+  # zoology's MHA derives head_dim = d_model / num_heads, so a head width is requested as a head
+  # COUNT (`head_dims:` in the arm; d_model = 128 => d_qk = 2 asks for 64 heads) — the structurally
+  # clean way to sweep d_qk on the stock mixer with no mixer change at all, and the same mechanism
+  # `law_grid`'s attention ladder already uses.
+  # The ladder stops at 16 (32 at L = 512, see below): log2 chi <= 6 here, so a threshold above
+  # d_qk = 16 would mean c < 0.375, far outside the packing regime the law is stated in. If the fit
+  # says otherwise the ladder is extended in a follow-up rather than pre-paid for now.
+  # THE L = 512 LADDER IS SHIFTED UP, and the reason is MEASURED: the attention score tensor is
+  # [batch, heads, L, L], so a head COUNT is what costs — d_qk = 2 means 64 heads, which at L = 512
+  # and batch 64 is 4 GiB for one copy and OOM'd under the 0.65 local cap in the smoke. The rungs
+  # there are [8, 16, 32] (16, 8 and 4 heads). This is not a trim of the design: those two conditions
+  # carry the LARGEST demands (chi = 33 and 64), so their thresholds are predicted at the WIDE end of
+  # the ladder anyway, and the narrow rungs the cap forbids are the ones the prediction does not need.
+  "attn_capacity":
+    - {build: attn, head_dims: [2, 4, 8, 16], conditions: [complete-k16, clustered-k16-m8]}
+    - {build: attn, head_dims: [8, 16, 32], seq_lens: [512],
+       conditions: [complete-k64, complete-k64-contract50]}
+fleet:
+  env: {GRID_TIERS: "decoupling"}        # LOCAL grid; this block only records the default tier

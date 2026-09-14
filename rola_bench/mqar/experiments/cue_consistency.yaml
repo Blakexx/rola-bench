@@ -1,0 +1,166 @@
+# CUE-CONSISTENCY — the paper's SECOND named boundary (Sec. 7.1): ADDRESS AGREEMENT, Eq. (7).
+# Built 2026-08-02 (Phase 2). Data generator: `zoology.data.cue_consistency` (knob->mechanism table
+# in its module docstring). Theory: V3_CAPACITY_THEORY_NOTES_2026-07-29 §3 (T0.5, the aliasing
+# ledger) and §3b (T3, the contract table); paper §5.2 Eq. (7) and §5.1's two error-free cases.
+#
+#   python -m rola_bench.fleet mqar cue_consistency
+#
+# WHY IT EXISTS. `law_grid.yaml` sweeps CAPACITY: it walks alpha_cap = N/L through 1 and measures the
+# first boundary. It structurally cannot move the second one, because standard MQAR's key IS its cue,
+# so addr_r(u) = addr_w(pi(u)) holds by construction at every N. This spec holds N ample and moves
+# the CONTRACT instead. §7.1's sentence — "degrading the cue while N stays ample should cost accuracy
+# on the same curve that capacity starvation does" — has no instrument without this file.
+#
+# SYMBOLS (defined here, at first use). D = key_digits, the number of sub-symbols composing a key
+# (2 here). q = cue_digits, how many of those D the QUERY presents; the rest are WILDCARD, so token
+# geometry is identical at every q. m = matches_per_cue, stored items sharing a cue's visible digits.
+# kv = num_kv_pairs = 8, stored items per episode. N = addressable states per head (`nc`).
+# L = sequence length = 128. beta = N / |K_eff| = learnability margin. P = digit_vocab = 64.
+#
+# HELD FIXED ON PURPOSE: N in {64, 256} against kv = 8, so beta >= 8 EVERYWHERE. No cell in this file
+# is capacity-starved. That is the design: the second boundary is claimed to bite "at any N", so any
+# degradation here that moves with N is a capacity effect and belongs to law_grid, not to this file.
+# L, kv, vocab, episode geometry and token statistics are identical across every condition — the only
+# thing that moves is which digits the query presents and how stably a token names an address digit.
+#
+# ============================ ADVANCE PREDICTIONS ============================
+# Recorded BEFORE the run, per the retrospective's rule. Each is marked PREDICTED and each names what
+# would falsify it. "Routed" = the three RoLA wirings + the D1 dense control unless stated.
+#
+# PREDICTED-1 (agreement is servable). At `agree` (q = D, consistent, m = 1) Eq. (7) is satisfiable
+#   by a global compositional map at sum_l b_l router features, with beta >= 8. Routed accuracy is at
+#   parity with the attention reference and is the CEILING for this file; every other condition is
+#   read as a drop from it. FALSIFIED BY: routed accuracy materially below attention at `agree`,
+#   which would indict the head rather than the theory.
+#
+# PREDICTED-2 (a partial cue with no written competitor is STILL EXACT — the sharp one). At
+#   `partial-m1` (q = 1, m = 1) the cue fixes half the address: measured cue<->address mutual
+#   information is exactly q/D = 0.5 of H(addr), and the read must spread over all P leaves of the
+#   open digit. It should nonetheless score AT the `agree` level. Reason: only ONE of those leaves was
+#   written this sequence, and unwritten features are inert under the normalized readout — paper §5.1,
+#   "a read spreading over features the sequence never wrote is exact as well". This is the file's
+#   most discriminating cell, because the naive information account ("less cue => worse recall")
+#   predicts a drop here and the theory predicts none. FALSIFIED BY: `partial-m1` significantly below
+#   `agree`. Such a drop would indict the inertness claim, which Sec. 4 and Sec. 5 both rest on.
+# PREDICTED-2b (arm ordering at `partial-m1`). Marginalizing requires the READ to spread over a
+#   level. ARM 1 (dense read) already does; ARM 3 (sparse read) must learn to; ARM 2 (union — one
+#   solve, both supports tied, O(1) each side) structurally cannot spread its read independently of
+#   its write. PREDICTED ordering arm1 >= arm3 > arm2 at `partial-m1`, with `agree` showing no such
+#   ordering. This is the coupling-independence law's cost, measured on the read side.
+#
+# PREDICTED-3 (multi-match is where the bill is actually paid, and it is 1/m). At `partial-m2` and
+#   `partial-m4` (q = 1, m = 2 and 4, recency) the m matching leaves ARE written, with distinct
+#   values, and the contract asks for the latest. A decay-free normalized blend returns the
+#   mass-weighted mixture with no signal to break the tie. PREDICTED routed accuracy ~ 1/m: ~0.50 at
+#   m = 2 and ~0.25 at m = 4, i.e. the degradation tracks the MATCH COUNT and is a straight line in
+#   1/m. PREDICTED further: raising N from 64 to 256 gives NO rescue at these cells (it is not a
+#   capacity failure). Attention pays the same marginalization bill but can break the tie with a
+#   recency component in its query, so attention > routed here is EXPECTED and is not a falsification
+#   — it is the priced regression toward attention's economics (theory notes §3b, position digits).
+#   FALSIFIED BY: accuracy that moves with N, or that does not track 1/m.
+#   NOT A CLAIM, RECORDED AS THE FOLLOW-UP: leaf-mass decay supplies exactly the recency signal these
+#   cells lack. No arm on the canonical slate carries it, so the decay-ON rescue is a follow-up cell,
+#   not a prediction of this grid.
+#
+# PREDICTED-4 (harmful vs harmless aliasing — the cleanest separation available).
+#   `partial-m4-consensus` has the SAME q, the SAME m = 4, the SAME marginalization width as
+#   `partial-m4`; the only change is that the four matching items carry the SAME value. The
+#   normalized readout is then exact by cancellation, (R m v)/(R m) = v (paper §5.1, first error-free
+#   case). PREDICTED: `partial-m4-consensus` ~ `agree`, and the gap to `partial-m4` ~ 0.75. Read
+#   together with PREDICTED-2 and -3 this says the failure is CONTRACT MISMATCH and never spread —
+#   the empirical content of the alpha < 1 "engineered aliasing" contract. FALSIFIED BY: consensus
+#   scoring materially below `agree`, which would mean the spread itself costs, not the mismatch.
+#
+# PREDICTED-5 (consistency: the compositional map is the thing that breaks, and the D1 control proves
+#   it). At `agree-shuffled` (q = D, episode_shuffled) the write side's slot order is permuted per
+#   episode and the query cannot observe it, so NO context-free map satisfies Eq. (7). Layer 1's
+#   router is static; only layer 2 sees a context-mixed input (theory notes §4, depth supplies the
+#   dynamism). PREDICTED: routed accuracy falls toward the 1/D! = 0.5 a purely static addressing
+#   scheme can reach, with partial recovery from the second layer. PREDICTED-5b, the discriminating
+#   half: the drop `agree` -> `agree-shuffled` is LARGER for the three factorized wirings than for the
+#   D1 DENSE CONTROL, which addresses with one softmax over N and therefore has no digit
+#   factorization to lose. That is the D1 control's job in this file and it is not an obvious
+#   prediction. PREDICTED-5c: attention is near-flat across `agree` -> `agree-shuffled` (it matches
+#   content, not slot semantics), which keeps the cell alive rather than a dead cell for everyone.
+#   FALSIFIED BY: the factorized/D1 gap running the other way.
+#
+# PREDICTED-6 (the m -> kv limit). `nocue` (q = 0, m = kv = 8) is PREDICTED-3 at the extreme: every
+#   stored item matches, routed accuracy ~ 1/8, attention near ceiling (it can serve "the most recent
+#   value" as a positional contract — the contract table's first row). This is NOT an
+#   architecture-independent floor and must not be read as one; chance over the value pool is ~1/4096.
+#   An arm scoring near ceiling here WITHOUT a recency mechanism indicates a generator leak, and that
+#   reading is what makes the cell worth its 72 runs (54 in `knobs` + 18 in `contenders`).
+#
+# PREDICTED-7 (capacity is not the axis). Across all seven conditions, both N rungs, PREDICTED no
+#   material N-dependence anywhere. Any condition whose accuracy moves with N contradicts the "at any
+#   N" clause of §7.1's second boundary and would mean this file is measuring capacity after all.
+# =============================================================================
+#
+# CELL COUNT — 450, arithmetic stated:
+#   tier `knobs`      (4 routed arms x 2 ncs + 1 attention) x 7 conditions x 2 lrs x 3 seeds = 378
+#   tier `contenders` (3 methods x 1 shape x 1 nc)          x 4 conditions x 2 lrs x 3 seeds =  72
+# Same order as ood_recall (189) and two orders below law_grid (2448). Conditions are TRAINED
+# separately, never mixed and sliced apart: the claim is whether a given contract is servable, and a
+# model trained on a mixture of contracts answers a different question.
+#
+# THE CONTENDER TIER RUNS THE SPINE (agree / partial-m1 / partial-m4 / nocue), not all seven. It is a
+# reference ladder for the (a)+(c) axes; the (b) axis is a statement about ROUTED addressing
+# specifically, and the contenders' monolithic state has no digit slots for a shuffle to permute.
+# `shapes: [square]` and a single N rung for the same reason — the contender shape/ceiling story is
+# ood_recall's and separation's, and duplicating it here would triple this file for no new claim.
+#
+# GEOMETRY NOTE. D = 2 is pinned by the backbone, not by taste: the value token must see both key
+# digits, and the hybrid's short conv is kernel_size 3. D = 3 is expressible in the generator and
+# would need a wider conv or a longer L to be a fair cell; it is not run here.
+project_name: rola-cue-consistency
+backbone: {d_model: 128, vocab: 8192, n_layers: 2, l_max: 128}
+data:
+  train_batch: 128
+  test_batch: 8
+  cache_dir: /tmp/zoology_cache_cue
+  protocol:
+    kind: cue_consistency
+    key_digits: 2                        # D
+    digit_vocab: 64                      # P; address space P^D = 4096 >> kv, so keys never collide
+    num_kv_pairs: 8                      # kv; divisible by every m used below
+    train_examples: 100000
+    test_examples: 1000
+    test_seq_lens: [128]                 # in-distribution only: extrapolation is ood_recall's axis
+train:
+  max_epochs: 40
+  weight_decay: 0.0
+  seeds: [0, 1, 2]
+  early_stopping_threshold: 2.0          # never triggers — full training
+  early_stopping_metric: valid/accuracy
+  slice_keys: [num_kv_pairs, input_seq_len, cue_digits, matches_per_cue]
+  eval_every: 10
+lrs: [0.003, 0.01]
+ncs: [64, 256]                           # both ample against kv = 8; the N-invariance of PREDICTED-7
+seq_lens: [128]
+conditions:
+  # knob (a) q=D | knob (b) consistent | knob (c) m=1 — the agreement reference (PREDICTED-1)
+  - {tag: agree,                cue_digits: 2, slot_consistency: consistent,       matches_per_cue: 1}
+  # knob (b) at its far rung, cue still full — the consistency axis alone (PREDICTED-5)
+  - {tag: agree-shuffled,       cue_digits: 2, slot_consistency: episode_shuffled, matches_per_cue: 1}
+  # knob (a) degraded, no written competitor — the inert-leaf cell (PREDICTED-2)
+  - {tag: partial-m1,           cue_digits: 1, slot_consistency: consistent,       matches_per_cue: 1}
+  # knob (c) ladder at fixed q — the 1/m law (PREDICTED-3)
+  - {tag: partial-m2,           cue_digits: 1, slot_consistency: consistent,       matches_per_cue: 2}
+  - {tag: partial-m4,           cue_digits: 1, slot_consistency: consistent,       matches_per_cue: 4}
+  # same width, harmless — the aliasing separation (PREDICTED-4)
+  - {tag: partial-m4-consensus, cue_digits: 1, slot_consistency: consistent,       matches_per_cue: 4,
+     match_resolution: consensus}
+  # knob (a) at zero, m = kv — the 1/m law at its limit (PREDICTED-6)
+  - {tag: nocue,                cue_digits: 0, slot_consistency: consistent,       matches_per_cue: 8}
+tiers:
+  "knobs":
+    - {build: routed, instance: rola-arm1-densread-sparsewrite, tag: arm1}
+    - {build: routed, instance: rola-arm2-union,                tag: arm2}
+    - {build: routed, instance: rola-arm3-levelsplit,           tag: arm3}
+    - {build: routed, instance: rola-d1-dense,                  tag: d1}
+    - {build: attn}
+  "contenders":
+    - {build: baselines, methods: [rla, gla, gdn], shapes: [square], ncs: [256],
+       conditions: [agree, partial-m1, partial-m4, nocue]}
+fleet:
+  env: {GRID_TIERS: "knobs"}
