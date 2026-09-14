@@ -38,7 +38,7 @@ class Options:
     subjects: str = "all"
     reps: int = 11
     warmup: int = 10
-    rounds: int = 3
+    rounds: int = 8
 
 
 def _select(available: tuple[str, ...], choice: str) -> list[str]:

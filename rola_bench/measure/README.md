@@ -30,6 +30,13 @@ whose matching rule the session states. Latency is only comparable within one se
 point, the matching rule, every arm's cell and raw samples in the order taken, and the clock; the paired ratios it
 carries are to the target, within that session.
 
+A run with a reference ends with each timing unit's VERDICT, and `python -m rola_bench.measure verdict` prints it again
+from the store without running anything: rola-results' `verdict` query (the reference arm's recent sessions of the unit
+as the baseline, the target commit's sessions as its runs, the last session's paired rounds) judged by rola-devtools'
+three gates. A regression needs the effect over the baseline's derived threshold, a significant paired test, and a
+second run over the line, so a unit that reads slow once says `flagged_not_confirmed` until `--repeat` runs it again.
+Sessions run 8 rounds by default, the floor below which the paired test cannot call anything significant.
+
 ## Keys, completion, repeats
 
 A node is one module on one unit (a cell, or a subject at a cell). Its key is sha256 over:
