@@ -49,7 +49,7 @@ def _select(available: tuple[str, ...], choice: str) -> list[str]:
     wanted = choice.split(",")
     unknown = sorted(set(wanted) - set(available))
     if unknown:
-        raise SystemExit(f"not in the target's registry: {unknown}")
+        raise SystemExit(f"not a cell the target runs (unregistered, or no arm in its binary): {unknown}")
     return wanted
 
 

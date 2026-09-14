@@ -154,15 +154,32 @@ def instrument(target: Target, args: list[str], dest: Path, timeout: int = 3600)
         dest.write_text(out.read_text())
 
 
+#: THE CELLS A TARGET CAN RUN: its registry's, less every carry cell whose arm (D, DV, warps_per_cta) its binary does not
+#: carry -- the binary's own answer (`rola.ops.carry.arms()`), never the source tree's.
+_REGISTRY = """
+import json, sys
+sys.path.insert(0, 'benchmarks')
+from benchmarks.cells.registry import CELLS
+from rola.ops.carry import arms
+carried = {tuple(arm) for arm in arms()}
+runnable = {name: (kind, spec) for name, (kind, spec) in CELLS.items()
+            if kind != 'carry' or (len(spec.widths), spec.dv, spec.warps_per_cta) in carried}
+"""
+
+
 @cache
 def cells(target: Target, kind: str) -> tuple[str, ...]:
-    """The registry's cells of `kind` (carry or layer), as the target checkout defines them."""
-    code = ("import json, sys; sys.path.insert(0, 'benchmarks'); from benchmarks.cells.registry import CELLS; "
-            f"print(json.dumps(sorted(n for n, (k, _) in CELLS.items() if k == {kind!r})))")
+    """The registry's cells of `kind` (carry or layer) the target runs; the cells its binary cannot carry are named once."""
+    code = _REGISTRY + (f"print(json.dumps([sorted(n for n, (k, _) in runnable.items() if k == {kind!r}), "
+                        f"sorted(n for n, (k, _) in CELLS.items() if k == {kind!r} and n not in runnable), sorted(carried)]))")
     rc, out = sh([target.python, "-c", code], target.worktree, 600)
     if rc:
         raise SystemExit(f"{target.label}: could not read the cell registry: {out[-400:]}")
-    return tuple(json.loads(out.strip().splitlines()[-1]))
+    runnable, uncarried, carried = json.loads(out.strip().splitlines()[-1])
+    if uncarried:
+        print(f"{target.label}: the binary carries {[tuple(a) for a in carried]}; left out, no arm for: "
+              f"{', '.join(uncarried)}", flush=True)
+    return tuple(runnable)
 
 
 @dataclass(frozen=True)
@@ -179,14 +196,11 @@ class Lane:
 #: An entry retires once no reference predates the count.
 PRE_COUNT_BENCHES = {"prefill_op_chunked": ("prefill_op", 4)}
 
-_ROSTER = """
-import json, sys
-sys.path.insert(0, 'benchmarks')
-from benchmarks.cells.registry import CELLS
+_ROSTER = _REGISTRY + """
 from bench.subjects import SUBJECTS, applicable
 counts = sorted({n for s in SUBJECTS.values() for n in getattr(s, 'calls', (1,))})
 roster = {}
-for cell, (kind, spec) in sorted(CELLS.items()):
+for cell, (kind, spec) in sorted(runnable.items()):
     for n in counts:
         for name in applicable(spec, kind, *([n] if n != 1 else [])):
             roster.setdefault(f'{name}@{n}', []).append(cell)
