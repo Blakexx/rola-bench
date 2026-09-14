@@ -5,10 +5,9 @@
 #
 # Builds, in order:
 #   1. blakeresearch/fleet-base:$IMG_VERSION  -- the fleet base (context: the fleet checkout).
-#   2. blakeresearch/rola-bench:$IMG_VERSION  -- FROM that base; rola_bench less lm (build.sh stages clean sources).
+#   2. blakeresearch/rola-bench:$IMG_VERSION  -- FROM that base; the rola_bench package (build.sh stages clean sources).
 # then pushes both (Docker Hub credentials from Docker Desktop). After it finishes, from this repository:
-#   python -m rola_bench.fleet perf paper_v1 --boxes 2
-#   python -m rola_bench.fleet similarity main --boxes 8
+#   python -m rola_bench.fleet mqar canonical --boxes 6
 set -euo pipefail
 
 V="${IMG_VERSION:-v2}"
@@ -32,4 +31,4 @@ echo "==> [2/2] bench image blakeresearch/rola-bench:$V"
 IMG_VERSION="$V" bash "$RB/docker/build.sh" mqar --push
 
 echo "==> done. pushed fleet-base:$V + rola-bench:$V"
-echo "    launch:  python -m rola_bench.fleet perf paper_v1 --boxes 2   |   python -m rola_bench.fleet similarity main --boxes 8"
+echo "    launch:  python -m rola_bench.fleet mqar canonical --boxes 6"

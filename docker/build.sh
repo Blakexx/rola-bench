@@ -3,8 +3,7 @@
 # one context — only runtime code (no .git/__pycache__/data/results/docs), so images are lean and
 # publication-safe. Requires the fleet base first: fleet/docker/build_base.sh.
 #
-#   build.sh mqar                 # build blakeresearch/rola-bench:$IMG_VERSION   (MQAR, perf, similarity)
-#   build.sh lm                   # build blakeresearch/rola-lm:$IMG_VERSION      (LM)
+#   build.sh mqar                 # build blakeresearch/rola-bench:$IMG_VERSION   (MQAR)
 #   build.sh mqar --push          # build, then push to the registry
 #   build.sh mqar --push --prune  # build, push, then remove the local image (keep base layers)
 #
@@ -18,17 +17,15 @@ set -euo pipefail
 command -v docker >/dev/null 2>&1 || { echo "FATAL: docker not on PATH (have you got /usr/bin?)" >&2; exit 3; }
 docker info >/dev/null 2>&1 || { echo "FATAL: docker daemon not reachable" >&2; exit 3; }
 
-TARGET="${1:?usage: build.sh <mqar|lm> [--push] [--prune]}"; shift || true
+TARGET="${1:?usage: build.sh mqar [--push] [--prune]}"; shift || true
 PUSH=0; PRUNE=0
 for a in "$@"; do case "$a" in --push) PUSH=1;; --prune) PRUNE=1;; esac; done
 
-# IMG_VERSION pins the tag. The mqar image is the whole rola_bench package less lm (mqar, perf and similarity select
-# their runner through FLEET_RUN_CMD at launch); the lm image is rola_bench less mqar.
+# IMG_VERSION pins the tag. The mqar image is the rola_bench package.
 V="${IMG_VERSION:-v2}"
 case "$TARGET" in
   mqar) TAG="blakeresearch/rola-bench:$V"; DF="mqar.Dockerfile"; WITH_ZOO=1; BASE_DEFAULT=v2;;
-  lm)   TAG="blakeresearch/rola-lm:$V";    DF="lm.Dockerfile";   WITH_ZOO=0; BASE_DEFAULT=v1;;
-  *) echo "unknown target '$TARGET' (mqar|lm)"; exit 2;;
+  *) echo "unknown target '$TARGET' (mqar)"; exit 2;;
 esac
 BASE_TAG="${FLEET_BASE_TAG:-$BASE_DEFAULT}"
 
@@ -54,11 +51,10 @@ if [ "$WITH_ZOO" = 1 ]; then
   cp "$ZOO/setup.py" "$STAGE/zoology/" 2>/dev/null || true
 fi
 
-# rola-bench: the whole suite package, minus the other benchmark's module (lean per-image) + legacy.
+# rola-bench: the suite package, less the legacy experiments.
 echo "staging rola-bench ($TARGET)…"
 mkdir -p "$STAGE/rola-bench"
-OTHER=$([ "$TARGET" = mqar ] && echo lm || echo mqar)
-"${RS[@]}" --exclude="mqar/experiments/legacy" --exclude="$OTHER" "$RB/rola_bench" "$STAGE/rola-bench/"
+"${RS[@]}" --exclude="mqar/experiments/legacy" "$RB/rola_bench" "$STAGE/rola-bench/"
 cp "$RB/pyproject.toml" "$STAGE/rola-bench/"
 
 cp "$HERE/$DF" "$STAGE/Dockerfile"

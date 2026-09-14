@@ -96,14 +96,6 @@ def test_a2w_variant_differs_from_arm3_in_alpha_alone():
     assert [r.get("alpha") for r in a2w] == [2.0, 1.5]      # sparsemax on the sparse write, entmax-1.5 on the read
 
 
-def test_named_cells_are_registry_wirings():
-    from rola_bench.models import rola as cells
-
-    for name, (wiring, decay) in cells.NAMED.items():
-        assert wiring in cells.WIRINGS, name
-        assert decay is None or decay["source"] in ("constant", "learned"), name
-
-
 def test_a_wiring_without_a_uniform_spelling_is_refused_by_name():
     from rola_bench.models import rola as cells
 

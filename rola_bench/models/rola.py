@@ -36,20 +36,6 @@ WIRINGS: dict[str, tuple[dict, ...]] = {
 
 CANONICAL_WIRINGS = ("rola-arm1-densread-sparsewrite", "rola-arm2-union", "rola-arm3-levelsplit", "rola-d1-dense")
 
-#: The learned leaf-mass clock the decay-on cells carry (rola.LearnedDecay at its symmetric init target).
-LEARNED_DECAY = {"source": "learned", "target_leaf_rate": 2.0 ** -8}
-
-#: The named flagship cells the LM and perf benches select by name: a wiring and its decay.
-NAMED: dict[str, tuple[str, dict | None]] = {
-    "rola-base-rla": ("rola-arm1-densread-sparsewrite", None),
-    "rola-base-union-global": ("rola-arm2-union", None),
-    "rola-base-levelsplit-global": ("rola-arm3-levelsplit", None),
-    "rola-base-levelsplit-a2w-global": ("rola-arm3-levelsplit-a2w", None),
-    "rola-base-massdecay-global": ("rola-arm1-densread-sparsewrite", LEARNED_DECAY),
-    "rola-base-hybrid-global-rla": ("rola-hybrid", None),
-    "rola-base-hybrid-tiedtop-global-rla": ("rola-hybrid-tiedtop", None),
-}
-
 
 class NoSpelling(ValueError):
     """A wiring has no spelling at this state count (a D-level wiring at an N with no uniform b**D = N)."""
@@ -101,14 +87,6 @@ def cell(wiring: str, n: int, *, widths=None, decay: dict | None = None, router_
     elif math.prod(widths) != int(n):
         raise ValueError(f"widths {list(widths)} multiply to {math.prod(widths)}, not N={n}")
     return Cell(wiring, tuple(int(w) for w in widths), decay=decay, router_bias=router_bias)
-
-
-def named(name: str, n: int, *, widths=None) -> Cell:
-    """A named flagship cell at state count `n`."""
-    if name not in NAMED:
-        raise ValueError(f"unknown named RoLA cell {name!r}; expected one of {sorted(NAMED)}")
-    wiring, decay = NAMED[name]
-    return cell(wiring, n, widths=widths, decay=decay)
 
 
 def layer(c: Cell, *, hidden_size: int, num_heads: int, head_v_dim: int, layer_idx: int = 0):

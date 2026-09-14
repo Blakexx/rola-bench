@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive PIP_ROOT_USER_ACTION=ignore PYTHONUNBUFFERED=
 RUN pip install --no-cache-dir \
         transformers opt_einsum einops pydantic pandas numpy tqdm wandb rich pyyaml scipy datasets
 
-# Clean package sources (staged by build.sh; rola_bench/lm excluded for this image) — install no-deps.
+# Clean package sources (staged by build.sh) — install no-deps.
 COPY fla        /opt/fla
 COPY zoology    /opt/zoology
 COPY rola-bench /opt/rola-bench

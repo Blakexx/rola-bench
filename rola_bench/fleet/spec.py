@@ -4,8 +4,7 @@ Every benchmark's experiments are declarative YAML under rola_bench/<bench>/expe
 This loads one and flattens its structured sections to the box env vars the runners read, so the
 spec file (committed) is the single source of truth — not shell env or code constants.
 
-(MQAR additionally expands its spec to zoology TrainConfigs via rola_bench.mqar.build_configs; the
-lm/perf/similarity specs are flatter — they just declare a work-list + the runner's knobs.)
+(MQAR additionally expands its spec to zoology TrainConfigs via rola_bench.mqar.build_configs.)
 """
 import os
 

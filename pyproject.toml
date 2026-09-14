@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "rola-bench"
 license = { file = "LICENSE" }
 version = "0.1.0"
-description = "RoLA's benchmarks (MQAR, LM, perf, similarity) on fleet, and the local measurement suite"
+description = "RoLA's benchmarks on fleet (MQAR) and the local measurement suite"
 requires-python = ">=3.10"
 # The dependency edges: the benches build RoLA through fla (our fork's RoLA layer wraps rola), MQAR's model and
 # baselines come from zoology, dispatch from fleet, and every result is stored through rola-results. First-party
@@ -19,18 +19,8 @@ dependencies = [
     "fleet",         # generic GPU orchestration
     "rola-results",  # the result store
     "torch",
-    "einops",
-    "pydantic",
     "numpy",
-    "pandas",
-    "scipy",
-    "opt-einsum",
-    "wandb",
-    "tqdm",
     "pyyaml",
-    "transformers>=4.45,<5",  # LM benchmark (rola_bench.lm): HF model + Trainer; fla 0.5.2 saves its models only under 4.x
-    "datasets",
-    "accelerate",
 ]
 
 [tool.setuptools.packages.find]

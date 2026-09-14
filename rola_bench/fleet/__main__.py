@@ -4,7 +4,6 @@
     python -m rola_bench.fleet mqar canonical --boxes 6     # the canonical MQAR grid
     python -m rola_bench.fleet mqar law_grid                # any MQAR spec, by name
     python -m rola_bench.fleet mqar seed_confirm            # seed-confirmation
-    python -m rola_bench.fleet lm default                   # the other benchmarks: lm, perf, similarity
 
 This is the suite's orchestration entrypoint. Each benchmark exposes a job BUILDER `f(config)->Job`
 (rola_bench.<bench>.job); we hand the built Job to the generic `fleet` Dispatcher, which owns
@@ -25,9 +24,6 @@ from fleet import Dispatcher, provider, semantics_of
 # benchmark -> (module, builder) where builder is f(config) -> fleet.Job
 JOBS = {
     "mqar": ("rola_bench.mqar.job", "mqar_job"),
-    "lm":   ("rola_bench.lm.job", "lm_job"),
-    "perf": ("rola_bench.perf.job", "perf_job"),     # kernel-efficiency (whole-bench cells, no ckpt)
-    "similarity": ("rola_bench.similarity.job", "sim_job"),  # post-hoc similarity-matrix eval, best-per-cell ckpts
 }
 
 
