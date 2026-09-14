@@ -1,7 +1,19 @@
 {
   "public": "Blakexx/rola-bench",
-  "ships": [".githooks", ".github", ".gitignore", ".pre-commit-config.yaml", "README.md", "docker", "pyproject.toml",
-            "rola_bench", "tests"],
-  "private": [".github/workflows/mirror.yml"],
+  "ships": [
+    ".githooks",
+    ".github",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    "LICENSE",
+    "README.md",
+    "docker",
+    "pyproject.toml",
+    "rola_bench",
+    "tests"
+  ],
+  "private": [
+    ".github/workflows/mirror.yml"
+  ],
   "allow": {}
 }
