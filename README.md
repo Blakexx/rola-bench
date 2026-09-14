@@ -125,7 +125,7 @@ over `rola_bench` and `tests`, the measurement engine's contract tests, and the 
 
 This repository is developed in the private `rola-bench-dev` and published to the public `rola-bench`: a push to
 `master` runs `.github/workflows/mirror.yml`, which publishes the declared files as one snapshot commit
-([`.github/mirror/README.md`](.github/mirror/README.md)).
+(`.github/mirror/declarations.json`; the export is [rola-devtools](https://github.com/Blakexx/rola-devtools)').
 
 ## Images
 
