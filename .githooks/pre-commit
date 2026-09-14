@@ -3,9 +3,15 @@
 # property of the checked-out files. It runs pre-commit against .pre-commit-config.yaml and refuses when pre-commit is
 # missing -- an absent gate that says nothing is indistinguishable from one that passed.
 set -euo pipefail
-if ! command -v pre-commit >/dev/null 2>&1; then
-  echo "pre-commit hook: refusing -- 'pre-commit' is not on PATH (pip install pre-commit)." >&2
+# The gate runs from the venv this checkout names (`git config rola.venv`, which rola's `tools/dev.py init` writes for
+# its suite and store checkouts): that venv's lock pins every tool the gate runs, so nothing resolves from the host's
+# own python.
+venv="$(git config --get rola.venv || true)"
+if [ -z "$venv" ] || [ ! -x "$venv/bin/pre-commit" ]; then
+  echo "pre-commit hook: refusing -- this checkout names no venv carrying the gate's tools (git config rola.venv: '$venv')." >&2
+  echo "  run python3 tools/dev.py init in the rola checkout" >&2
   exit 1
 fi
+export PATH="$venv/bin:$PATH"
 exec pre-commit hook-impl --config=.pre-commit-config.yaml --hook-type=pre-commit \
   --hook-dir "$(cd "$(dirname "$0")" && pwd)" -- "$@"
