@@ -88,9 +88,10 @@ GRID_TIERS=decoupling python -m rola_bench.mqar.local_grid --config graph_grid -
 python -m rola_bench.mqar.analysis.graph --config graph_grid
 ```
 
-The measurement suite composes its owners' graphs (`rola_devtools.graph`): each rola checkout's own units (SASS,
-registers, phases, pipe counters and timelines, timed arms, peak memory) beside rola-bench's attention reference, with
-sessions that interleave them per group. It runs only what is not stored and keeps every sample. See
+The measurement suite runs rola checkouts and rola-bench's attention reference through rola-devtools' measurement
+service (`rola_devtools.measure`) on the central cells: each checkout's registered units (its build, SASS, registers,
+phases, pipe counters and timelines, timed arms, peak memory) beside the attention arm, with sessions that interleave
+them per group. It runs only what is not stored and keeps every sample. See
 [`rola_bench/measure/README.md`](rola_bench/measure/README.md):
 
 ```bash
