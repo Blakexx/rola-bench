@@ -9,7 +9,7 @@ memory pass and the stores. This package defines no measurement of rola's.
     python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --arg groups=gate
     python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg groups=all|gate|a,b] \
-        [--arg cells=all|a,b] [--arg skip_cells=a,b] [--arg parts=instruments,memory,sessions] \
+        [--arg cells=all|a,b] [--arg skip_cells=a,b] [--arg parts=instruments,memory,null,sessions] \
         [--arg instruments=all|sass,phases,...] [--arg attention=yes|no] [--arg rounds=8] [--arg reps=11] \
         [--arg warmup=10] [--arg store_root=DIR] [--force]
 
@@ -41,13 +41,16 @@ warmup, then rounds of reps, each rep every entry once in a fresh random order, 
 with the target's clock reader proving the clock before and after, an untimed reset before every call. An entry that
 cannot run on a cell (a binary without the arm, a setup that does not fit) is recorded as that member's failure and the
 session goes on; a session that cannot run at all fails the build, and the server's stop still runs. One MEMORY pass
-(`measure_memory`) takes each entry on each cell alone.
+(`measure_memory`) takes each entry on each cell alone. One NULL GATE (`measure_null_gate`) times the target's
+`carry_forward` on each group's first RoLA cell against copies of itself in second workers: where the per-rep ratios put
+one outside their interquartile range, a worker's bias is found, and a ratio across checkouts' workers is read beside it.
 
 ## Records
 
-Instruments at `rola/<instrument>`, sessions at `timing/session`, the memory pass at `timing/memory`, through
-`rola_results`. A store target appends a run-stamped sample to the record its source's semantics key -- the executor,
-its parameters, the cells' records and the draw, and every dependency's key and output -- so a session of the same
+Instruments at `rola/<instrument>`, sessions at `timing/session`, the memory pass at `timing/memory`, the null gate at
+`timing/null`, through `rola_results`. A store target appends a run-stamped sample to the record its source's semantics
+key -- the executor, its parameters, the cells' records and the draw, and every dependency's key and output -- so a
+session of the same
 checkouts' binaries on the same cells adds a sample to one record, and a session run from rola's own root with the same
 entries shares it. A session's samples are raw and ordered (round, rep, position); which checkout is the reference for a
 ratio is chosen when the records are read, within a session.

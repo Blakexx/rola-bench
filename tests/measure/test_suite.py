@@ -1,8 +1,9 @@
 """The suite's root (`declare.py`) and groups: every group holds its claim against the central cells and a group breaking
 it is refused; the root loads each checkout's own declarations, gives the target alone its instruments, and declares one
 session per group and arm set over every checkout's registration on the group's cells beside the attention reference,
-one memory pass, a store for each result and a server stop that runs after everything; a checkout without declarations
-is not compared. No GPU: nothing is built. `python -m unittest tests.measure.test_suite`"""
+one memory pass, a null gate on the target's carry arm, a store for each result and a server stop that runs after
+everything; a checkout without declarations is not compared. No GPU: nothing is built.
+`python -m unittest tests.measure.test_suite`"""
 from __future__ import annotations
 
 import sys
@@ -95,6 +96,9 @@ class Root(unittest.TestCase):
         stored = {t.label: t.deps["source"].label for t in targets.values() if (t.executor or "").endswith("store:put")}
         self.assertEqual({k: stored[k] for k in ("tip/store/phases", "store/memory")},
                          {"tip/store/phases": "tip/phases", "store/memory": "memory"})
+        gate = targets["null"]
+        self.assertEqual((gate.deps["r0"].label, gate.params["cells"]),
+                         ("tip/carry_forward", ["nl64k-dense", "flagship-dense"]))
         stop = targets["timing-server-stop"]
         self.assertTrue(stop.always_run)
         self.assertIn(targets["store/memory"], stop.deps.values())

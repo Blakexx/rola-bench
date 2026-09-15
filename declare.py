@@ -3,7 +3,7 @@
     python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --arg groups=gate
     python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \\
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg groups=all|gate|a,b] [--arg cells=all|a,b] \\
-        [--arg skip_cells=a,b] [--arg parts=instruments,memory,sessions] [--arg instruments=all|sass,phases,...] \\
+        [--arg skip_cells=a,b] [--arg parts=instruments,memory,null,sessions] [--arg instruments=all|sass,phases,...] \\
         [--arg attention=yes|no] [--arg rounds=8] [--arg reps=11] [--arg warmup=10] [--arg store_root=DIR]
 
 Run it with a python that has rola-devtools and rola-results (the target's venv does). A TARGET is a rola checkout and
@@ -15,10 +15,12 @@ timing registrations, and for the target alone its instruments (`parts`, `instru
 
 For each selected group (`rola_bench/measure/groups.py`) and each arm set it times together, one SESSION
 (`measure_timing`) over every checkout's registration of those arms on the group's cells, the target's clock reader
-proving the clock; one MEMORY pass over every registration on every selected cell; a store for each instrument
-(`rola/<instrument>`), each session (`timing/session`) and the memory pass (`timing/memory`); and the server's stop,
-which runs whatever failed. Which checkout is the reference for a ratio is chosen when the records are read
-(`rola_results`), never here.
+proving the clock; one MEMORY pass over every registration on every selected cell; a NULL GATE over the target's
+`carry_forward` on each group's first RoLA cell, its entries timed against copies of themselves in second workers, so a
+comparison across checkouts' workers is read beside what the gate found; a store for each instrument
+(`rola/<instrument>`), each session (`timing/session`), the memory pass (`timing/memory`) and the null gate
+(`timing/null`); and the server's stop, which runs whatever failed. Which checkout is the reference for a ratio is
+chosen when the records are read (`rola_results`), never here.
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from rola_devtools.build.declare import Env, load
 from rola_devtools.store import store
 from rola_devtools.timing.declare import (
     measure_memory,
+    measure_null_gate,
     measure_timing,
     register_timing,
     start_timing_server,
@@ -36,7 +39,7 @@ from rola_devtools.timing.declare import (
 
 HERE = Path(__file__).resolve().parent
 BENCH = "bench"
-PARTS = ("instruments", "memory", "sessions")
+PARTS = ("instruments", "memory", "null", "sessions")
 
 
 def checkout(spec: str) -> dict:
@@ -82,11 +85,11 @@ def root(g, target: str, references: str = "", groups: str = "all", cells: str =
             selected.append((group, kept))
     names = list(dict.fromkeys(c for _group, kept in selected for c in kept))
 
-    timing = bool(chosen_parts & {"memory", "sessions"})
+    timing = bool(chosen_parts & {"memory", "null", "sessions"})
     server = start_timing_server(g) if timing else None
     root_dir = store_root or None
     entries: dict[str, list] = {}
-    stores, clock = [], None
+    stores, clock, null_entry = [], None, None
     for i, c in enumerate(checkouts):
         declared = load(c["worktree"] / "declare.py")
         subject = i == 0
@@ -103,6 +106,7 @@ def root(g, target: str, references: str = "", groups: str = "all", cells: str =
             stores.append(store(g, f"{c['label']}/store/{name}", source=instrument, location=f"rola/{name}",
                                 cache=instrument.cache, root=root_dir))
         clock = clock or out["clock"]
+        null_entry = null_entry or out["entries"].get("carry_forward")
     qkv = [c for c in names if registry.cell(c)["data"].split(":")[0].rsplit(".", 1)[-1] == "qkv"]
     if timing and attention == "yes" and qkv:
         bench = Env(BENCH, checkouts[0]["python"], str(HERE), {"PYTHONPATH": str(HERE)})
@@ -122,6 +126,13 @@ def root(g, target: str, references: str = "", groups: str = "all", cells: str =
                                          rounds=int(rounds), reps=int(reps), warmup=int(warmup))
                 measured.append(session)
                 stores.append(store(g, f"store/session/{name}", source=session, location="timing/session", root=root_dir))
+    null_cells = [next(c for c in kept if c in null_entry.inputs) for _group, kept in selected
+                  if null_entry is not None and set(kept) & set(null_entry.inputs)]
+    if "null" in chosen_parts and null_cells:
+        gate = measure_null_gate(g, "null", server=server, entry=null_entry, clock=clock, cells=null_cells,
+                                 rounds=int(rounds), reps=int(reps), warmup=int(warmup))
+        measured.append(gate)
+        stores.append(store(g, "store/null", source=gate, location="timing/null", root=root_dir))
     if "memory" in chosen_parts and entries:
         memory = measure_memory(g, "memory", server=server, entries=[r for rs in entries.values() for r in rs], cells=names)
         measured.append(memory)
