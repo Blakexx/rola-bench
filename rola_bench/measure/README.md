@@ -3,7 +3,7 @@
 The local measurement tier of rola-bench. A run takes the checkouts to measure, builds a graph of measurement nodes on
 them, runs what is not already stored, and keeps every result through `rola_results` at the location `suite/<module>`
 (rola's dev config names the rola-results checkout as `store.root`; `tools/dev.py init` makes it importable). Standard
-library and `rola_results` only: it runs from any rola venv or the dev container without fleet, zoology or transformers. Rented, citable runs stay on the fleet tier (`python -m rola_bench.fleet`, `rola_bench/perf/README.md`);
+library and `rola_results` only: it runs from any rola venv or the dev container without fleet, zoology or transformers. Rented, citable runs stay on the fleet tier (`python -m rola_bench.fleet`);
 this tier is the engineering gate.
 
     python -m rola_bench.measure plan --target worktree:PATH --reference worktree:PATH,label:master,schedule:box/sparse-g32 --points gate
