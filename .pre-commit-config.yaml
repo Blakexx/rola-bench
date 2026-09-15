@@ -1,5 +1,5 @@
 # rola-bench's commit gate: ruff with rola's rule set over the whole package and its tests, rola's blank-line spacing
-# family (E30x, which ruff gates only under preview, so it keeps its own invocation), and the measurement engine's
+# family (E30x, which ruff gates only under preview, so it keeps its own invocation), and the measurement suite's
 # contract tests (no GPU).
 repos:
   - repo: local
@@ -8,18 +8,18 @@ repos:
         name: ruff (rola_bench, tests)
         language: system
         entry: ruff check --select E,F,UP,B,SIM,I,C4 --line-length 127 --target-version py310
-        files: ^(rola_bench|tests)/.*\.py$
+        files: ^(declare\.py|(rola_bench|tests)/.*\.py)$
       - id: ruff-e3
         name: ruff E30x (blank-line spacing, preview)
         language: system
         entry: ruff check --preview --select E3 --line-length 127 --target-version py310
-        files: ^(rola_bench|tests)/.*\.py$
-      - id: measure-groups-contract
-        name: the suite's groups and targets (python -m unittest tests.measure.test_groups)
+        files: ^(declare\.py|(rola_bench|tests)/.*\.py)$
+      - id: measure-suite-contract
+        name: the suite's root and groups (python -m unittest tests.measure.test_suite)
         language: system
-        entry: python3 -m unittest tests.measure.test_groups
+        entry: python3 -m unittest tests.measure.test_suite
         pass_filenames: false
-        files: ^(rola_bench/measure|tests/measure)/
+        files: ^(declare\.py|rola_bench/measure/|tests/measure/)
       - id: mirror-declarations
         name: every tracked path is declared for the public mirror (.github/mirror/declarations.json)
         language: system

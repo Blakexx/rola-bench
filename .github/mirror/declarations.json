@@ -7,6 +7,7 @@
     ".pre-commit-config.yaml",
     "LICENSE",
     "README.md",
+    "declare.py",
     "docker",
     "pyproject.toml",
     "rola_bench",

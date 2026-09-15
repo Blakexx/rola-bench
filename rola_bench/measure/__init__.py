@@ -1,5 +1,4 @@
-"""The measurement suite: rola checkouts measured by their own instruments, every result kept under a content key.
-
-The standard library and `rola_results` only, so it runs in any rola venv and in the dev container without the rest of
-rola-bench's dependencies. `python -m rola_bench.measure --help`; docs: rola_bench/measure/README.md.
+"""The measurement suite's own parts: the groups of central cells that launch together (`groups.py`) and the attention
+reference timed beside rola (`attention.py`). The root that composes rola checkouts with them is `declare.py` at the
+repository's root; docs: rola_bench/measure/README.md.
 """

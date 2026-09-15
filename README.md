@@ -5,7 +5,7 @@ RoLA's benchmarks and its local measurement suite. The benchmark (MQAR recall) i
 with their own instruments on this machine. Every result goes through `rola_results`.
 
 The language-modeling, layer-performance and similarity benchmarks are archived at the tag
-`archive/pre-rebuild-2026-09-14`: layer performance is rebuilt on the measurement system's interleaving driver, and
+`archive/pre-rebuild-2026-09-14`: layer performance is rebuilt on the measurement suite's timing sessions, and
 language modeling and similarity return when RoLA trains.
 
 rola-bench is a library consumer like any other. It builds RoLA only through fla (our fork of it), whose RoLA layer and HF model
@@ -28,7 +28,7 @@ rola_bench/
                         spec.py (spec loader), verify.py (the box boot gate)
   mqar/                 job.py, run.py (box side), smoke.py, build_configs.py, local_grid.py (this machine's card),
                         realized_state.py, analysis/graph.py, experiments/*.yaml
-  measure/              the local measurement suite (measure/README.md)
+  measure/              the measurement suite's groups and attention reference (measure/README.md)
 tests/<area>/           one directory per area above
 docker/                 the fleet images
 ```
@@ -88,14 +88,14 @@ GRID_TIERS=decoupling python -m rola_bench.mqar.local_grid --config graph_grid -
 python -m rola_bench.mqar.analysis.graph --config graph_grid
 ```
 
-The measurement suite runs rola checkouts and rola-bench's attention reference through rola-devtools' measurement
-service (`rola_devtools.measure`) on the central cells: each checkout's registered units (its build, SASS, registers,
-phases, pipe counters and timelines, timed arms, peak memory) beside the attention arm, with sessions that interleave
-them per group. It runs only what is not stored and keeps every sample. See
-[`rola_bench/measure/README.md`](rola_bench/measure/README.md):
+The measurement suite is a declared build (`declare.py`, over rola-devtools' `rola_devtools.build`): each rola
+checkout's own declarations (its build, SASS, registers, phases, pipe counters and timelines, timing entries) composed
+with rola-bench's attention reference, one interleaved timing session per group of central cells, a memory pass, and
+every result stored. See [`rola_bench/measure/README.md`](rola_bench/measure/README.md):
 
 ```bash
-python -m rola_bench.measure run --target worktree:<rola checkout> --reference worktree:<baseline>,label:master
+python -m rola_devtools.build run declare.py:suite --arg target=worktree:<rola checkout> \
+    --arg references='worktree:<baseline>,label:master'
 ```
 
 Local numbers are engineering gates. Citable numbers come from rented runs.
@@ -104,7 +104,7 @@ Local numbers are engineering gates. Citable numbers come from rented runs.
 
 Every result is stored through `rola_results`, in the rola-results repository: the fleet benches at `<bench>/<config>`,
 the local MQAR grid beside the fleet's records at `mqar/<config>` (keyed by its checkouts instead of an image), and the
-measurement suite at its units' locations (`rola/<instrument>`, `rola/memory`, `bench/memory`, `bench/session`). A fleet job plugs the store into
+measurement suite at `rola/<instrument>`, `timing/session` and `timing/memory`. A fleet job plugs the store into
 fleet's `store_result` sink and `done_ids`. Each pulled row is a sample of the record keyed by (bench, config, cell,
 image), stored once however often it is pulled again. A cell is done when the current image has an ok sample, so an
 image bump runs the grid again. Failures are samples too.

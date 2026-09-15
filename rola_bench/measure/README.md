@@ -1,64 +1,59 @@
-# `rola_bench.measure` — rola checkouts and the libraries they are compared against, measured as one build
+# `rola_bench.measure` — rola checkouts and the libraries they are compared against, measured as one declared build
 
-The local measurement tier of rola-bench, over rola-devtools' measurement service (`rola_devtools.measure`) and its
-central cells (`rola_devtools.cells`). A measurement is a UNIT its owner registers: rola's in each rola checkout's
-`benchmarks/registry.py`, rola-bench's (the attention reference) in `registry.py` here. This package defines no
-measurement of rola's: it names the instances a run measures, the groups of cells that launch together, and which arms
-are timed in one session, and the service builds, composes and runs what the store does not hold, through
-`rola_results`. A node run here and the same node run from its owner's checkout
-(`python -m rola_devtools.measure run benchmarks.registry:registry ...`) share one record.
+The local measurement tier of rola-bench. The build is rola-devtools' declared build system (`rola_devtools.build`),
+its sessions are its timing system's (`rola_devtools.timing`), and every input is a central cell
+(`rola_devtools.cells`). The root is `declare.py` at the repository's root: it loads each rola checkout's own
+`declare.py` by path, composes them with this package's attention reference and groups, and declares the sessions, the
+memory pass and the stores. This package defines no measurement of rola's.
 
-    python -m rola_bench.measure plan --target worktree:PATH[,venv:PATH][,label:NAME] [--reference ...] --groups gate
-    python -m rola_bench.measure run  --target ... [--reference ...] [--groups all|gate|a,b]
-                                    [--only instruments,memory,sessions] [--units carry.phases,...] [--cells all|a,b]
-                                    [--skip-cells a,b] [--no-attention] [--repeat] [--force] [--store-root DIR]
-    python -m rola_bench.measure show rola/carry.phases
-    python -m rola_bench.measure verdict [--cell C] [--subject S] [--baseline LABEL]
+    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --arg groups=gate
+    python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \
+        [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg groups=all|gate|a,b] \
+        [--arg cells=all|a,b] [--arg skip_cells=a,b] [--arg parts=instruments,memory,sessions] \
+        [--arg instruments=all|sass,phases,...] [--arg attention=yes|no] [--arg rounds=8] [--arg reps=11] \
+        [--arg warmup=10] [--arg store_root=DIR] [--force]
 
-Run it with the target's venv python.
+Run it from this repository with a python that has rola-devtools and rola-results (a rola checkout's venv does).
 
-## Instances (`targets.py`)
+## Checkouts
 
-A target is a rola checkout and the venv that runs it; `--reference` adds another. Each is an instance of its own
-`benchmarks/registry.py`, served by one worker in its own directory under its own venv for the whole run: its build, its
-clock reader, its instruments (`carry.sass`, `carry.registers`, and per carry cell its binary carries `carry.phases`,
-`carry.counters`, `carry.census`, `carry.timeline`) and its bench subjects as timed arms (`carry_forward`, `prefill_op`,
-`entmax_solve@layer=C`, `decode_step@layer=C`). The first target is the SUBJECT, the others REFERENCES. rola-bench's own
-instance (label `bench`, in the subject's venv, role `library`) registers `flash`: causal attention through torch's
-forced flash backend on every central QKV cell (`attention.py`).
+A checkout is a rola worktree and the venv that runs it (`venv-<name>` beside it unless `venv:` names one); its label
+scopes its targets (`tip/binary`) and defaults to its directory's name. The `target` is the first checkout, the
+`references` the others. Each checkout's `declare.py` declares, in that checkout's venv and directory: its build
+(cached while its binary stands), its machine facts, its timing registrations on the selected cells (`carry_forward` and
+`prefill_op` on carry cells, `entmax_solve@layer=C` and `decode_step@layer=C` on layer cells under each construction)
+and its clock reader; the target alone also declares its instruments (`sass`, `registers`, and per carry cell `phases`,
+`counters`, `census`, `timeline`, `roofline`). A worktree without a `declare.py` predates the declaration API and is not
+compared.
 
-The service runs every instance's build first -- a rola arm accepts a cell from its binary's own arm tables -- then
-describes each unit on the groups' cells: a unit that does not accept a cell makes no node there. A node's key is its
-owner's unit, parameters and identity (the binary's sha256, its code and every checkout file the code imports, the
-environment), the cell's record and the digest of the central draw, and each dependency's key and output. Labels, roles
-and paths are not in it.
+`attention.py` is rola-bench's own entry: `flash`, causal attention through torch's forced flash backend on every QKV
+cell of the selected groups, registered in the target's venv.
 
-## Groups, sessions, selection (`groups.py`, `groups.json`)
+## Groups and sessions (`groups.py`)
 
-A GROUP is a selection of central cells and its relation: what it holds (`L1024-N65536-dv64`: 1024 tokens, value width
-64, RoLA's state N = 65536), the parameters its cells share (checked when the file loads), and `together`, the arm sets
-each timed in one session. `--groups gate` is `GATE_GROUPS`. A run composes, for the selected groups:
+A GROUP is a selection of central cells and its relation, as code: what it holds (`L1024-N65536-dv64`: 1024 tokens,
+value width 64, RoLA's state N = 65536, attention one bf16 head), the parameters its cells share, and the arm sets it
+times together. `check` refuses a group whose cells break its claim. `gate` selects `GATE`.
 
-- one SESSION per group and arm set: every instance's arms of the set on the group's cells each accepts -- rola's
-  `carry_forward` on the group's carry cells in every checkout beside `flash` on its QKV cell. Every member sets up
-  before any call (a barrier), then warmup, then interleaved rounds in a fresh random order each rep under the GPU lock
-  with the host's clock proven, and the session's record keeps every member's samples, its post and its ratios to the
-  subject's arm on the same cell. Its relation -- the group, its claim, each instance's role -- is recorded, never keyed;
-- the subject's INSTRUMENTS on the groups' cells (`--units` narrows them), and a MEMORY node for every instance's timed
-  arm on each cell: the arm alone, torch's allocator peak plus what the arm holds outside the allocator.
-
-`--only` keeps some of the three, `--cells` narrows the cells, `--skip-cells` leaves cells out. A refusal (a setup that
-does not fit the device) is stored; a crash or a timeout fails its node or its whole session, and a node depending on a
-failure is blocked.
+For each selected group and arm set the root declares one SESSION (`measure_timing`): every checkout's registration of
+those arms, and the attention entry, on the group's cells. Every entry is built before any call (a barrier); then the
+warmup, then rounds of reps, each rep every entry once in a fresh random order, under the GPU lock and the clock lock
+with the target's clock reader proving the clock before and after, an untimed reset before every call. An entry that
+cannot run on a cell (a binary without the arm, a setup that does not fit) is recorded as that member's failure and the
+session goes on; a session that cannot run at all fails the build, and the server's stop still runs. One MEMORY pass
+(`measure_memory`) takes each entry on each cell alone.
 
 ## Records
 
-Builds at `rola/build`, instruments at `rola/<instrument>`, memory at `rola/memory` and `bench/memory`, sessions at
-`bench/session`. A record holds the semantics its key hashes and every sample: its output or error, when, how long, and
-its provenance (each instance's label and checkout). Ratios are stored only within a session, where they were measured;
-everything across sessions is a reading of the records.
+Instruments at `rola/<instrument>`, sessions at `timing/session`, the memory pass at `timing/memory`, through
+`rola_results`. A store target appends a run-stamped sample to the record its source's semantics key -- the executor,
+its parameters, the cells' records and the draw, and every dependency's key and output -- so a session of the same
+checkouts' binaries on the same cells adds a sample to one record, and a session run from rola's own root with the same
+entries shares it. A session's samples are raw and ordered (round, rep, position); which checkout is the reference for a
+ratio is chosen when the records are read, within a session.
 
 ## Tests
 
-`python -m unittest tests.measure.test_groups` checks the groups against the central cells and the targets, with no GPU;
-rola-devtools' `tests/test_measure.py` checks the service on a fake registry.
+`python -m unittest tests.measure.test_suite` checks the groups against the central cells and the root's declarations
+on fake checkouts, with no GPU; rola-devtools' `tests/test_declared_build.py` and `tests/test_timing.py` check the build
+and timing systems.
