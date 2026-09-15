@@ -80,22 +80,24 @@ def groups(target: Target, names: str) -> list[dict]:
     return [registry.point(name) for name in wanted]
 
 
-def compose(instances: list[Instance], selected: list[dict], *, nodes: str = "all", cells: str = "all",
+def compose(instances: list[Instance], selected: list[dict], *, nodes: str = "all", cells: str = "all", skip: str = "",
             rounds: int = 8, reps: int = 11, warmup: int = 10) -> tuple[list[Session], set[str]]:
     """`(sessions, selection)` over the instances: the first is the subject target, then its references, then
     rola-bench's. `nodes` is `all` or comma-separated name prefixes (`carry.phases`, `memory`, `time`); `cells` narrows
-    the groups' cells."""
+    the groups' cells and `skip` leaves cells out (a cell known to hang)."""
     rola = [inst for inst in instances if inst.env.label != BENCH]
     bench = next((inst for inst in instances if inst.env.label == BENCH), None)
     names = {inst.env.label: {n["name"] for n in inst.nodes} for inst in instances}
     prefixes = None if nodes == "all" else tuple(nodes.split(","))
     narrow = None if cells == "all" else set(cells.split(","))
+    skipped = set(filter(None, skip.split(",")))
 
     def chosen(name: str) -> bool:
         return prefixes is None or any(name == p or name.startswith(p + ".") or name.startswith(p + "@") for p in prefixes)
 
     def cells_of(group: dict, runner: str) -> list[str]:
-        return [c["name"] for c in group["runners"].get(runner, []) if narrow is None or c["name"] in narrow]
+        return [c["name"] for c in group["runners"].get(runner, [])
+                if (narrow is None or c["name"] in narrow) and c["name"] not in skipped]
 
     roles = {inst.env.label: "subject" if i == 0 else "reference" for i, inst in enumerate(rola)}
     if bench is not None:

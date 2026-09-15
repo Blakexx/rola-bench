@@ -59,6 +59,11 @@ class Compose(unittest.TestCase):
         self.assertEqual(sessions, [])
         self.assertEqual(selection, {"tip:memory.carry_forward@alt", "bench:memory.flash@attn-L1024"})
 
+    def test_a_skipped_cell_leaves_every_session_and_selection(self):
+        sessions, selection = compose([self.tip, self.bench], [GROUP], skip="alt")
+        self.assertNotIn("tip:time.carry_forward@alt", sessions[0].members)
+        self.assertFalse(any("@alt" in q for q in selection))
+
     def test_a_target_needs_a_worktree_and_a_venv(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "venv" / "bin").mkdir(parents=True)

@@ -24,6 +24,7 @@ def main() -> int:
         p.add_argument("--groups", default="all", help="all, gate, or a comma list of groups (registry.json)")
         p.add_argument("--nodes", default="all", help="all, or comma-separated node prefixes (carry.phases, memory, time)")
         p.add_argument("--cells", default="all", help="all, or a comma list narrowing the groups' cells")
+        p.add_argument("--skip-cells", default="", help="a comma list of cells to leave out (a cell known to hang)")
         p.add_argument("--no-attention", action="store_true", help="leave rola-bench's attention reference out")
         p.add_argument("--reps", type=int, default=11, help="odd: a round's median is one of its samples")
         p.add_argument("--warmup", type=int, default=10, help="at least the driver's floor of 10")
@@ -35,7 +36,17 @@ def main() -> int:
             p.add_argument("--force", action="store_true", help="run every selected node again")
     p = sub.add_parser("show", help="print the records of a location (rola/carry.phases, bench/session, ...)")
     p.add_argument("location")
+    p = sub.add_parser("verdict", help="each timing unit's newest session judged against its reference (rola_results)")
+    p.add_argument("--cell")
+    p.add_argument("--subject")
+    p.add_argument("--baseline", help="the reference label (default: a session's first reference)")
     a = ap.parse_args()
+
+    if a.cmd == "verdict":
+        from rola_results.verdict import table, verdicts
+
+        print(table(verdicts(cell=a.cell, subject=a.subject, baseline=a.baseline)))
+        return 0
 
     if a.cmd == "show":
         for rec in Store(a.location).records():
@@ -54,8 +65,8 @@ def main() -> int:
         raise SystemExit(f"target and reference labels must differ, got {labels}")
     envs = [rola_env(t) for t in (target, *references)] + ([] if a.no_attention else [bench_env(target.python)])
     instances = [load(env) for env in envs]
-    sessions, selection = compose(instances, groups(target, a.groups), nodes=a.nodes, cells=a.cells, rounds=a.rounds,
-                                  reps=a.reps, warmup=a.warmup)
+    sessions, selection = compose(instances, groups(target, a.groups), nodes=a.nodes, cells=a.cells, skip=a.skip_cells,
+                                  rounds=a.rounds, reps=a.reps, warmup=a.warmup)
     outcomes = run(instances, lambda location: Store(location, a.store_root), sessions, hold=hold(target), select=selection,
                    repeat=getattr(a, "repeat", False), force=getattr(a, "force", False), dry=a.cmd == "plan",
                    provenance=lambda env: {"label": env.label, **checkout(env.cwd)},
