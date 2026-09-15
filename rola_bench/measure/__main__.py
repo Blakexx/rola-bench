@@ -1,4 +1,4 @@
-"""`python -m rola_bench.measure plan|run|show` -- see rola_bench/measure/README.md."""
+"""`python -m rola_bench.measure plan|run|show|verdict` -- see rola_bench/measure/README.md."""
 from __future__ import annotations
 
 import argparse
@@ -8,7 +8,8 @@ from pathlib import Path
 
 from rola_results import ROOT, Store, checkout
 
-from .compose import bench_env, compose, groups, hold, parse, rola_env
+#: what a run composes; `--only` narrows it
+PARTS = ("instruments", "memory", "sessions")
 
 
 def main() -> int:
@@ -16,13 +17,14 @@ def main() -> int:
     signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     ap = argparse.ArgumentParser(prog="python -m rola_bench.measure", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, help_ in (("run", "run every selected node and session not yet stored"),
+    for name, help_ in (("run", "build every target, then run every selected node and session not yet stored"),
                         ("plan", "list every selected node and session and whether it is stored")):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--target", required=True, help="worktree:PATH[,venv:PATH][,label:NAME]: the subject checkout")
         p.add_argument("--reference", action="append", default=[], help="a checkout timed beside the target (repeatable)")
-        p.add_argument("--groups", default="all", help="all, gate, or a comma list of groups (registry.json)")
-        p.add_argument("--nodes", default="all", help="all, or comma-separated node prefixes (carry.phases, memory, time)")
+        p.add_argument("--groups", default="all", help="all, gate, or a comma list of groups (groups.json)")
+        p.add_argument("--only", default=",".join(PARTS), help=f"a comma list of {', '.join(PARTS)}")
+        p.add_argument("--units", default="all", help="all, or a comma list of the subject's instruments (carry.phases, ...)")
         p.add_argument("--cells", default="all", help="all, or a comma list narrowing the groups' cells")
         p.add_argument("--skip-cells", default="", help="a comma list of cells to leave out (a cell known to hang)")
         p.add_argument("--no-attention", action="store_true", help="leave rola-bench's attention reference out")
@@ -56,26 +58,48 @@ def main() -> int:
                   f"{last.get('label', '') or last.get('checkout', '')} {(last.get('git_sha') or '')[:7]}")
         return 0
 
-    from rola_devtools.graph.engine import load, run
+    from rola_devtools.measure.service import Service, outcomes_line
 
-    target = parse(a.target)
-    references = [parse(r) for r in a.reference]
-    labels = [t.label for t in (target, *references)]
-    if len(set(labels)) != len(labels):
-        raise SystemExit(f"target and reference labels must differ, got {labels}")
-    envs = [rola_env(t) for t in (target, *references)] + ([] if a.no_attention else [bench_env(target.python)])
-    instances = [load(env) for env in envs]
-    sessions, selection = compose(instances, groups(target, a.groups), nodes=a.nodes, cells=a.cells, skip=a.skip_cells,
-                                  rounds=a.rounds, reps=a.reps, warmup=a.warmup)
-    outcomes = run(instances, lambda location: Store(location, a.store_root), sessions, hold=hold(target), select=selection,
-                   repeat=getattr(a, "repeat", False), force=getattr(a, "force", False), dry=a.cmd == "plan",
-                   provenance=lambda env: {"label": env.label, **checkout(env.cwd)},
-                   log=lambda line: print(line, flush=True))
-    counts: dict[str, int] = {}
-    for outcome in outcomes:
-        counts[outcome.status] = counts.get(outcome.status, 0) + 1
-    print("measure: " + ", ".join(f"{n} {status}" for status, n in sorted(counts.items())) + f"; records under {a.store_root}")
-    return 1 if counts.get("failed") or counts.get("blocked") else 0
+    from .groups import load, select, sessions
+    from .targets import instances, parse
+
+    only = set(a.only.split(","))
+    if only - set(PARTS):
+        raise SystemExit(f"--only takes {PARTS}, got {sorted(only - set(PARTS))}")
+    targets = [parse(a.target), *(parse(r) for r in a.reference)]
+    insts = instances(targets, attention=not a.no_attention)
+    chosen = select(load(), a.groups)
+    skip = frozenset(filter(None, a.skip_cells.split(",")))
+    if a.cells != "all":
+        skip |= {c for g in chosen for c in g.cells} - set(a.cells.split(","))
+    roles = {i.label: i.role for i in insts}
+    planned = [s for g in chosen for s in sessions(g, roles, reference=targets[0].label, skip=skip, rounds=a.rounds,
+                                                   reps=a.reps, warmup=a.warmup)] if "sessions" in only else []
+    cells = sorted({c for g in chosen for c in g.cells} - skip)
+    timed = {arm for g in chosen for arms in g.together for arm in arms}
+    units = None if a.units == "all" else set(a.units.split(","))
+
+    def wanted(instance, unit) -> bool:
+        if unit["kind"] == "instrument":
+            return "instruments" in only and instance.role == "subject" and (units is None or unit["name"] in units)
+        return unit["kind"] == "arm" and unit["name"] in timed
+
+    def store(location):
+        return Store(location, a.store_root)
+
+    dry = a.cmd == "plan"
+    with Service(insts, provenance=lambda instance: {"label": instance.label, **checkout(instance.cwd)},
+                 log=lambda line: print(line, flush=True)) as service:
+        built = service.build(store, dry=dry)
+        unbuilt = [o for o in built if o.status not in ("complete", "ran")]
+        if unbuilt:
+            print(f"measure: the builds are {outcomes_line(built)}; the units on cells are described once they are built")
+            return 0 if all(o.status == "pending" for o in unbuilt) else 1
+        nodes = service.nodes(cells, sessions=planned, select=wanted, memory="memory" in only)
+        outcomes = service.run(nodes, store, repeat=getattr(a, "repeat", False), force=getattr(a, "force", False),
+                               dry=dry)
+    print(f"measure: {outcomes_line(outcomes)}; records under {a.store_root}")
+    return 1 if any(o.status in ("failed", "blocked") for o in outcomes) else 0
 
 
 if __name__ == "__main__":

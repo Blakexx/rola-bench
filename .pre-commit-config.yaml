@@ -14,10 +14,10 @@ repos:
         language: system
         entry: ruff check --preview --select E3 --line-length 127 --target-version py310
         files: ^(rola_bench|tests)/.*\.py$
-      - id: measure-composer-contract
-        name: measure composer contract (python -m unittest tests.measure.test_compose)
+      - id: measure-groups-contract
+        name: the suite's groups and targets (python -m unittest tests.measure.test_groups)
         language: system
-        entry: python3 -m unittest tests.measure.test_compose
+        entry: python3 -m unittest tests.measure.test_groups
         pass_filenames: false
         files: ^(rola_bench/measure|tests/measure)/
       - id: mirror-declarations
