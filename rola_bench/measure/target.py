@@ -5,7 +5,7 @@ Everything a node runs is that checkout's OWN instrument, invoked by its JSON co
 its own venv, so a target measures itself by its own definitions -- the way the probe runs each binary's own worker.
 
 The identities:
-- a BINARY is the sha256 of the checkout's built extension (`rola/_C*.so`);
+- a BINARY is the sha256 of the checkout's built extension (`extension`);
 - an INSTRUMENT is the sha256 of the instrument file and every repository file it imports, transitively (found by
   walking the imports, so a dependency cannot be forgotten), plus the data files and directories the module names (the cell
   registry, a budget, the kernel source a compile reads);
@@ -85,12 +85,18 @@ def config(target: Target, key: str) -> str:
     return out.strip().splitlines()[-1]
 
 
+def extension(target: Target) -> Path:
+    """The checkout's built extension: in its binary plugin `rola_<toolchain>/_C.*so`, or `rola/_C.*so` in a checkout
+    from before the plugin (rola's wheel split), which a baseline can be."""
+    sos = sorted(target.worktree.glob("rola_*/_C.*so")) or sorted((target.worktree / "rola").glob("_C.*so"))
+    if not sos:
+        raise SystemExit(f"{target.label}: no built extension in {target.worktree} (rola_<toolchain>/ or rola/)")
+    return sos[0]
+
+
 @cache
 def binary_key(target: Target) -> str:
-    sos = sorted((target.worktree / "rola").glob("_C*.so"))
-    if not sos:
-        raise SystemExit(f"{target.label}: no built extension under {target.worktree}/rola")
-    return hashlib.sha256(sos[0].read_bytes()).hexdigest()
+    return hashlib.sha256(extension(target).read_bytes()).hexdigest()
 
 
 @cache

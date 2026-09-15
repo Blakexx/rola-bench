@@ -28,7 +28,18 @@ from functools import partial
 from pathlib import Path
 
 from .engine import Node
-from .target import SUITE_REGISTRY, Target, accepted, binary_key, environment_key, instrument, instrument_key, registry, sh
+from .target import (
+    SUITE_REGISTRY,
+    Target,
+    accepted,
+    binary_key,
+    environment_key,
+    extension,
+    instrument,
+    instrument_key,
+    registry,
+    sh,
+)
 
 #: the points the kernel's gate reads first; `--points gate` selects them
 GATE_POINTS = ("L65536-N65536-dv64", "L1024-N65536-dv64")
@@ -88,7 +99,7 @@ def _meta(t: Target) -> dict:
 
 def carry_nodes(t: Target, opt: Options, wanted: set[str]) -> list[Node]:
     meta = _meta(t)
-    so = str(next((t.worktree / "rola").glob("_C*.so")))
+    so = str(extension(t))
     nodes: list[Node] = []
 
     def add(module: str, unit: str, identity: dict, args: list[str], repeatable: bool, timeout: int = 3600) -> None:
