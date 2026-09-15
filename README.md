@@ -88,9 +88,9 @@ GRID_TIERS=decoupling python -m rola_bench.mqar.local_grid --config graph_grid -
 python -m rola_bench.mqar.analysis.graph --config graph_grid
 ```
 
-The measurement suite measures rola checkouts (SASS, registers, phases, pipe counters and timelines, interleaved timing
-sessions) as a graph of nodes keyed by what each result depends on. It runs only what is not stored and keeps every
-sample. It needs only the standard library and `rola_results`. See
+The measurement suite composes its owners' graphs (`rola_devtools.graph`): each rola checkout's own units (SASS,
+registers, phases, pipe counters and timelines, timed arms, peak memory) beside rola-bench's attention reference, with
+sessions that interleave them per group. It runs only what is not stored and keeps every sample. See
 [`rola_bench/measure/README.md`](rola_bench/measure/README.md):
 
 ```bash
@@ -103,7 +103,7 @@ Local numbers are engineering gates. Citable numbers come from rented runs.
 
 Every result is stored through `rola_results`, in the rola-results repository: the fleet benches at `<bench>/<config>`,
 the local MQAR grid beside the fleet's records at `mqar/<config>` (keyed by its checkouts instead of an image), and the
-measurement suite at `suite/<module>`. A fleet job plugs the store into
+measurement suite at its units' locations (`rola/<instrument>`, `rola/memory`, `bench/memory`, `bench/session`). A fleet job plugs the store into
 fleet's `store_result` sink and `done_ids`. Each pulled row is a sample of the record keyed by (bench, config, cell,
 image), stored once however often it is pulled again. A cell is done when the current image has an ok sample, so an
 image bump runs the grid again. Failures are samples too.
@@ -115,11 +115,11 @@ Tests run per area. The GPU-heavy suites are never run unscoped:
 ```bash
 python -m pytest tests/models
 python -m pytest tests/mqar
-python -m unittest tests.measure.test_engine
+python -m unittest tests.measure.test_compose
 ```
 
 The commit gate (`.githooks/pre-commit` -> `.pre-commit-config.yaml`) runs ruff with rola's rule set and its E30x spacing family
-over `rola_bench` and `tests`, the measurement engine's contract tests, and the public mirror's declaration check.
+over `rola_bench` and `tests`, the measurement composer's contract tests, and the public mirror's declaration check.
 
 ## Publishing
 
