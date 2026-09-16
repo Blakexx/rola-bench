@@ -71,6 +71,25 @@ def checkout(spec: str) -> dict:
     return {"worktree": worktree, "python": str(venv / "bin" / "python"), "label": label}
 
 
+#: THE RULES A SURFACE IS COMPARED UNDER ACROSS CHECKOUTS: the strategy and its parameters, as a function of the facts
+#: the target states about the surface's numerics (its `NUMERICS`). The oracle is BIT-IDENTICAL: both checkouts run fp64
+#: on identical inputs, so a rewrite that only nearly reproduces the old one has changed the definition. The producer is
+#: SUPPORT-EQUAL: its declared purpose was to replace a bisection with a closed form, so agreement to 1e-13 is the result
+#: and the support set is the claim with teeth. A kernel is PER SLOT at twice the reassociation its checkout measured,
+#: with the quantities it states exact held exact -- bit-identity is not expected of a kernel whose fan-in reassociates.
+def _kernel_rule(facts: dict) -> tuple:
+    per_quantity = {q: {"clauses": [[2 * f["rtol"], 2 * f["atol"]]]} for q, f in facts.get("reassociation", {}).items()}
+    per_quantity.update({q: {"clauses": [[0.0, 0.0]]} for q in facts.get("exact", ())})
+    return "per-slot", {"per_quantity": per_quantity}
+
+
+RULES = {
+    "oracle": lambda _facts: ("bit-identical", {}),
+    "producer": lambda _facts: ("support-equal", {"rtol": 0.0, "atol": 1e-13}),
+    "carry-kernel": _kernel_rule,
+}
+
+
 def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "11", warmup: str = "10",
          store_root: str = "") -> dict:
     """EVERY target the suite has over these checkouts; a build that wants fewer prunes by label (`--only`, `--skip`)."""
@@ -111,16 +130,17 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
         clock = clock or out["clock"]
         null_entry = null_entry or out["entries"].get("carry_forward")
 
-    #: THE CROSS-CHECKOUT DIFFS: each surface the target exposes, against the same surface in each reference, under the
-    #: rule the target's own declarations state for it -- the oracle pair's dual run, and kernel-vs-kernel, as targets
+    #: THE CROSS-CHECKOUT DIFFS: each surface the target exposes, against the same surface in each reference, under
+    #: THIS ROOT'S rule for it (`RULES`) -- the suite owns how checkouts are compared, as it owns how they are timed
     subject_decl, subject = declared_by[labels[0]]
     diffs = []
     for label in labels[1:]:
         _decl, other = declared_by[label]
-        for surface, (_exec, _kind, _tier, _holds, strategy, params) in subject_decl["SURFACES"].items():
+        for surface in subject_decl["SURFACES"]:
             left, right = subject["sides"][surface], other["sides"].get(surface)
-            if right is None:
+            if right is None or surface not in RULES:
                 continue
+            strategy, params = RULES[surface](subject_decl.get("NUMERICS", {}).get(surface, {}))
             verdict = diff(g, f"diff/{surface}/{label}", left=left, right=right, strategy=strategy, params=params,
                            minimum=len(left.inputs))
             kept = store(g, f"store/diff/{surface}/{label}", source=verdict, location=f"diff/{surface}", root=root_dir)

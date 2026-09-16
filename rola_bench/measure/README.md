@@ -28,8 +28,9 @@ scopes its targets (`tip/binary`) and defaults to its directory's name. The `tar
 its clock reader and its DIFF SIDES (`SURFACES`: the fp64 oracle, the producer reference, the carry kernel, each over
 the cells of its kind and tier); the target alone also declares its instruments (`sass`, `registers`, and per carry cell
 `phases`, `counters`, `census`, `timeline`, `roofline`) and its own kernel-vs-oracle diff. For each surface and each
-reference, the root declares ONE DIFF (`rola_devtools.diff`) of the two checkouts' sides under the rule the target
-states for that surface -- the oracle pair's dual run, and kernel-vs-kernel conformance -- stored at `diff/<surface>`;
+reference, the root declares ONE DIFF (`rola_devtools.diff`) of the two checkouts' sides under THIS ROOT'S rule for
+that surface (`RULES`: the oracle bit-identical, the producer support-equal, a kernel per slot at twice the
+reassociation its checkout states in `NUMERICS`, exact quantities exact) -- the oracle pair's dual run, and kernel-vs-kernel conformance -- stored at `diff/<surface>`;
 `diffs` is the group over them. A worktree without a `declare.py` predates the declaration API and is not
 compared.
 

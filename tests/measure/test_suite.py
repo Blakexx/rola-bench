@@ -32,7 +32,7 @@ FAKE = textwrap.dedent('''
         return Env(label, python, str(path))
 
 
-    SURFACES = {"oracle": ("fake:side", "carry", "oracle", {"host_cpu": "all"}, "bit-identical", {})}
+    SURFACES = {"oracle": ("fake:side", "carry", "oracle", {"host_cpu": "all"})}
 
 
     def declare(g, env, *, timing=None, instruments=("sass", "phases")):
