@@ -123,9 +123,9 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
                 continue
             verdict = diff(g, f"diff/{surface}/{label}", left=left, right=right, strategy=strategy, params=params,
                            minimum=len(left.inputs))
-            diffs.append(verdict)
-            stores.append(store(g, f"store/diff/{surface}/{label}", source=verdict, location=f"diff/{surface}",
-                                root=root_dir))
+            kept = store(g, f"store/diff/{surface}/{label}", source=verdict, location=f"diff/{surface}", root=root_dir)
+            stores.append(kept)
+            diffs.append(kept)  #: the group runs the diff AND files its verdict
 
     qkv = [c for c in names if registry.cell(c)["data"].split(":")[0].rsplit(".", 1)[-1] == "qkv"]
     if qkv:
