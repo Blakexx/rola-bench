@@ -4,7 +4,7 @@
     python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \\
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \\
         [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]...
-    python -m rola_devtools.build run  declare.py:jewels --arg target=... --arg references=...   # the dual run
+    python -m rola_devtools.build run  declare.py:diffs --arg target=... --arg references=...   # the dual run
 
 Run it with a python that has rola-devtools and rola-results (the target's venv does). A TARGET is a rola checkout and
 the venv that runs it; `references` adds others, `;`-separated. Each checkout's own `declare.py` is loaded by path and
@@ -18,7 +18,7 @@ entry is the attention reference
 (`rola_bench/measure/attention.py`'s `flash`), registered on the groups' QKV cells in the target's venv.
 
 For each surface the target exposes (its `SURFACES`) and each reference, one DIFF of the two checkouts' sides under the
-rule the target states for that surface -- the crown jewels' dual run and kernel-vs-kernel conformance, stored at
+rule the target states for that surface -- the oracle pair's dual run and kernel-vs-kernel conformance, stored at
 `diff/<surface>`. For each group (`rola_bench/measure/groups.py`) and each arm set it times together, one SESSION
 (`measure_timing`) over every checkout's registration of those arms on the group's cells, the target's clock reader
 proving the clock; one MEMORY pass over every registration on every selected cell; a NULL GATE over the target's
@@ -112,9 +112,9 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
         null_entry = null_entry or out["entries"].get("carry_forward")
 
     #: THE CROSS-CHECKOUT DIFFS: each surface the target exposes, against the same surface in each reference, under the
-    #: rule the target's own declarations state for it -- the crown jewels' dual run, and kernel-vs-kernel, as targets
+    #: rule the target's own declarations state for it -- the oracle pair's dual run, and kernel-vs-kernel, as targets
     subject_decl, subject = declared_by[labels[0]]
-    jewels = []
+    diffs = []
     for label in labels[1:]:
         _decl, other = declared_by[label]
         for surface, (_exec, _kind, _tier, _holds, strategy, params) in subject_decl["SURFACES"].items():
@@ -123,7 +123,7 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
                 continue
             verdict = diff(g, f"diff/{surface}/{label}", left=left, right=right, strategy=strategy, params=params,
                            minimum=len(left.inputs))
-            jewels.append(verdict)
+            diffs.append(verdict)
             stores.append(store(g, f"store/diff/{surface}/{label}", source=verdict, location=f"diff/{surface}",
                                 root=root_dir))
 
@@ -156,4 +156,4 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
     measured.append(memory)
     stores.append(store(g, "store/memory", source=memory, location="timing/memory", root=root_dir))
     stop = stop_timing_server(g, server=server, after=[*measured, *stores])
-    return {"suite": g.group("suite", [*stores, stop]), "jewels": g.group("jewels", jewels)}
+    return {"suite": g.group("suite", [*stores, stop]), "diffs": g.group("diffs", diffs)}

@@ -10,7 +10,7 @@ memory pass and the stores. This package defines no measurement of rola's.
     python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \
         [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]... [--force]
-    python -m rola_devtools.build run  declare.py:jewels --arg target=... --arg references=...   # the dual run
+    python -m rola_devtools.build run  declare.py:diffs --arg target=... --arg references=...   # the dual run
 
 THE ROOT DECLARES EVERYTHING and takes no selector: which of it a build runs is pruned by LABEL at the CLI, which
 knows nothing of cells, groups or parts -- `--only 'tip/phases'` runs that instrument and what it needs;
@@ -29,8 +29,8 @@ its clock reader and its DIFF SIDES (`SURFACES`: the fp64 oracle, the producer r
 the cells of its kind and tier); the target alone also declares its instruments (`sass`, `registers`, and per carry cell
 `phases`, `counters`, `census`, `timeline`, `roofline`) and its own kernel-vs-oracle diff. For each surface and each
 reference, the root declares ONE DIFF (`rola_devtools.diff`) of the two checkouts' sides under the rule the target
-states for that surface -- the crown jewels' dual run, and kernel-vs-kernel conformance -- stored at `diff/<surface>`;
-`jewels` is the group over them. A worktree without a `declare.py` predates the declaration API and is not
+states for that surface -- the oracle pair's dual run, and kernel-vs-kernel conformance -- stored at `diff/<surface>`;
+`diffs` is the group over them. A worktree without a `declare.py` predates the declaration API and is not
 compared.
 
 `attention.py` is rola-bench's own entry: `flash`, causal attention through torch's forced flash backend on every QKV

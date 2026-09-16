@@ -118,7 +118,7 @@ class Root(unittest.TestCase):
         stop = targets["timing-server-stop"]
         self.assertTrue(stop.always_run)
         self.assertIn(targets["store/memory"], stop.deps.values())
-        self.assertEqual(set(public), {"suite", "jewels"})
+        self.assertEqual(set(public), {"suite", "diffs"})
 
     def test_the_root_takes_no_selector_and_a_build_prunes_it_by_label(self):
         """The root declares EVERYTHING; `--only`/`--skip` at the CLI is the one way to run less of it."""
@@ -145,7 +145,7 @@ class Root(unittest.TestCase):
         self.assertEqual((verdict.params["strategy"], verdict.params["minimum"]),
                          ("bit-identical", len(targets["tip/side/oracle"].inputs)))
         self.assertEqual(targets["store/diff/oracle/master"].params["location"], "diff/oracle")
-        self.assertEqual([t.label for t in public["jewels"].deps.values()], ["diff/oracle/master"])
+        self.assertEqual([t.label for t in public["diffs"].deps.values()], ["diff/oracle/master"])
         self.assertNotIn("diff/oracle/tip", targets)
 
     def test_a_checkout_without_declarations_or_with_a_taken_label_is_refused(self):
