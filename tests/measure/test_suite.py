@@ -24,6 +24,7 @@ SUITE = load(ROOT / "declare.py")
 #: `carry_forward` registration and a clock reader
 FAKE = textwrap.dedent('''
     from rola_devtools.build.declare import Env
+    from rola_devtools.cells.declare import cells as cell_nodes
     from rola_devtools.timing.declare import register_clock_reader, register_timing
 
 
@@ -39,7 +40,8 @@ FAKE = textwrap.dedent('''
             return out
         carry = [c for c in cells if not c.startswith(("qkv-", "layer-"))]
         out["entries"]["carry_forward"] = register_timing(g, "carry_forward", server=timing, env=env,
-                                                          executor="fake:timed", cells=carry, deps={"binary": binary})
+                                                          executor="fake:timed", cells=cell_nodes(g, carry),
+                                                          deps={"binary": binary})
         out["clock"] = register_clock_reader(g, "clock", server=timing, env=env, executor="fake:clock")
         return out
 ''')
@@ -111,7 +113,7 @@ class Root(unittest.TestCase):
         self.assertFalse(any(label.startswith("session/") for label in targets))
         _public, targets = self.root(groups="gate", skip_cells="nl64k-dense,nl64k-alt-k4,qkv-L65536-dv64", parts="sessions")
         self.assertEqual(sorted(label for label in targets if label.startswith("session/")),
-                         ["session/L1024-N65536-dv64/carry_forward+flash", "session/L1024-N65536-dv64/prefill_op+flash"])
+                         ["session/L1024-N65536-dv64/carry_forward+flash", "session/L1024-N65536-dv64/carry_intra+flash"])
 
     def test_a_checkout_without_declarations_or_with_a_taken_label_is_refused(self):
         (self.base / "base" / "declare.py").unlink()

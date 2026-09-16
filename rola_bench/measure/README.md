@@ -21,7 +21,7 @@ A checkout is a rola worktree and the venv that runs it (`venv-<name>` beside it
 scopes its targets (`tip/binary`) and defaults to its directory's name. The `target` is the first checkout, the
 `references` the others. Each checkout's `declare.py` declares, in that checkout's venv and directory: its build
 (cached while its binary stands), its machine facts, its timing registrations on the selected cells (`carry_forward` and
-`prefill_op` on carry cells, `entmax_solve@layer=C` and `decode_step@layer=C` on layer cells under each construction)
+`carry_intra` on carry cells, `entmax_solve@layer=C` and `decode_step@layer=C` on layer cells under each construction)
 and its clock reader; the target alone also declares its instruments (`sass`, `registers`, and per carry cell `phases`,
 `counters`, `census`, `timeline`, `roofline`). A worktree without a `declare.py` predates the declaration API and is not
 compared.

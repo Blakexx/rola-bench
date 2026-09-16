@@ -10,7 +10,9 @@ Run it with a python that has rola-devtools and rola-results (the target's venv 
 the venv that runs it; `references` adds others, `;`-separated. Each checkout's own `declare.py` is loaded by path and
 called under its label's scope with the selected cells and one shared timing server: its build, machine facts and
 timing registrations, and for the target alone its instruments (`parts`, `instruments`). A checkout without a
-`declare.py` predates the declaration API and is not compared. rola-bench's own entry is the attention reference
+`declare.py` predates the declaration API and is not compared. Every central cell is a NODE the checkouts share
+(`rola_devtools.cells.declare`), and a target that runs on cells takes those nodes as its data inputs. rola-bench's own
+entry is the attention reference
 (`rola_bench/measure/attention.py`'s `flash`), registered on the groups' QKV cells in the target's venv.
 
 For each selected group (`rola_bench/measure/groups.py`) and each arm set it times together, one SESSION
@@ -27,6 +29,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from rola_devtools.build.declare import Env, load
+from rola_devtools.cells.declare import cells as cell_nodes
 from rola_devtools.store import store
 from rola_devtools.timing.declare import (
     measure_memory,
@@ -40,6 +43,11 @@ from rola_devtools.timing.declare import (
 HERE = Path(__file__).resolve().parent
 BENCH = "bench"
 PARTS = ("instruments", "memory", "null", "sessions")
+
+
+def _cells_of(registration) -> set:
+    """The cells a registration registers on: its data inputs are the cell NODES, each naming its cell."""
+    return {node.params["cell"] for node in registration.inputs}
 
 
 def checkout(spec: str) -> dict:
@@ -111,14 +119,14 @@ def root(g, target: str, references: str = "", groups: str = "all", cells: str =
     if timing and attention == "yes" and qkv:
         bench = Env(BENCH, checkouts[0]["python"], str(HERE), {"PYTHONPATH": str(HERE)})
         entries["flash"] = [register_timing(g, f"{BENCH}/flash", server=server, env=bench,
-                                            executor="rola_bench.measure.attention:flash", cells=qkv,
+                                            executor="rola_bench.measure.attention:flash", cells=cell_nodes(g, qkv),
                                             code={"entry": "rola_bench/measure/attention.py", "roots": ["."]})]
 
     measured = []
     if "sessions" in chosen_parts:
         for group, kept in selected:
             for arms in group.together:
-                members = [r for arm in arms for r in entries.get(arm, ()) if set(r.inputs) & set(kept)]
+                members = [r for arm in arms for r in entries.get(arm, ()) if _cells_of(r) & set(kept)]
                 if not members:
                     continue
                 name = f"{group.name}/{'+'.join(arms)}"
@@ -126,8 +134,8 @@ def root(g, target: str, references: str = "", groups: str = "all", cells: str =
                                          rounds=int(rounds), reps=int(reps), warmup=int(warmup))
                 measured.append(session)
                 stores.append(store(g, f"store/session/{name}", source=session, location="timing/session", root=root_dir))
-    null_cells = [next(c for c in kept if c in null_entry.inputs) for _group, kept in selected
-                  if null_entry is not None and set(kept) & set(null_entry.inputs)]
+    on_gate = set() if null_entry is None else _cells_of(null_entry)
+    null_cells = [next(c for c in kept if c in on_gate) for _group, kept in selected if set(kept) & on_gate]
     if "null" in chosen_parts and null_cells:
         gate = measure_null_gate(g, "null", server=server, entry=null_entry, clock=clock, cells=null_cells,
                                  rounds=int(rounds), reps=int(reps), warmup=int(warmup))

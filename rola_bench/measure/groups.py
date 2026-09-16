@@ -7,7 +7,7 @@ registry. The root (`declare.py`) loads this file by path.
 
     attention(tokens, states, dv, rola_cells)   RoLA's carry cells of one length, state count N and value width beside
                                                 the attention cell of that length and width; `carry_forward` and
-                                                `prefill_op` each timed beside `flash`
+                                                `carry_intra` each timed beside `flash`
     layer(construction, cell)                   a layer input under one of RoLA's constructions; its solve and its
                                                 decode step each timed alone
 
@@ -37,7 +37,7 @@ def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...]) ->
                  f"{tokens} tokens and value width {dv}, bf16, attention one head of width {dv}; RoLA's state "
                  f"N = {states} ({fair})",
                  ("tokens", "dv"), (*rola_cells, f"qkv-L{tokens}-dv{dv}"),
-                 (("carry_forward", "flash"), ("prefill_op", "flash")), states)
+                 (("carry_forward", "flash"), ("carry_intra", "flash")), states)
 
 
 def layer(construction: str, cell: str) -> Group:

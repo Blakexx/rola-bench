@@ -46,7 +46,10 @@ def flash(cell, params):
         torch.cuda.synchronize()
         return start.elapsed_time(end)
 
-    built = {"cell": cell.name, "library": "torch", "torch": torch.__version__, "backend": "flash",
+    #: A LAYER-LEVEL ENTRY (Blake, 2026-09-15): attention as a library gives it, which is the only level a comparison
+    #: between two libraries is fair at -- RoLA's own layer holds its projections and its state, and a reading pairs
+    #: entries of one level or refuses.
+    built = {"cell": cell.name, "level": "layer", "library": "torch", "torch": torch.__version__, "backend": "flash",
              "implementation": current_flash_attention_impl() or "FA2", "tokens": cell.tokens, "d_v": cell.dv,
              "heads": cell.heads, "batch": cell.batch, "dtype": cell.dtype, "causal": cell.causal,
              "device": torch.cuda.get_device_name(0)}
