@@ -6,12 +6,15 @@ its sessions are its timing system's (`rola_devtools.timing`), and every input i
 `declare.py` by path, composes them with this package's attention reference and groups, and declares the sessions, the
 memory pass and the stores. This package defines no measurement of rola's.
 
-    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --arg groups=gate
+    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --only 'session/L1024*'
     python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \
-        [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg groups=all|gate|a,b] \
-        [--arg cells=all|a,b] [--arg skip_cells=a,b] [--arg parts=instruments,memory,null,sessions] \
-        [--arg instruments=all|sass,phases,...] [--arg attention=yes|no] [--arg rounds=8] [--arg reps=11] \
-        [--arg warmup=10] [--arg store_root=DIR] [--force]
+        [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \
+        [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]... [--force]
+    python -m rola_devtools.build run  declare.py:jewels --arg target=... --arg references=...   # the dual run
+
+THE ROOT DECLARES EVERYTHING and takes no selector: which of it a build runs is pruned by LABEL at the CLI, which
+knows nothing of cells, groups or parts -- `--only 'tip/phases'` runs that instrument and what it needs;
+`--skip '*/timeline'` drops that instrument and everything that reads it; `--only 'session/*'` runs every session.
 
 Run it from this repository with a python that has rola-devtools and rola-results (a rola checkout's venv does).
 
@@ -20,14 +23,18 @@ Run it from this repository with a python that has rola-devtools and rola-result
 A checkout is a rola worktree and the venv that runs it (`venv-<name>` beside it unless `venv:` names one); its label
 scopes its targets (`tip/binary`) and defaults to its directory's name. The `target` is the first checkout, the
 `references` the others. Each checkout's `declare.py` declares, in that checkout's venv and directory: its build
-(cached while its binary stands), its machine facts, its timing registrations on the selected cells (`carry_forward` and
+(cached while its binary stands), its machine facts, its timing registrations on every central cell of each kind (`carry_forward` and
 `carry_intra` on carry cells, `entmax_solve@layer=C` and `decode_step@layer=C` on layer cells under each construction)
-and its clock reader; the target alone also declares its instruments (`sass`, `registers`, and per carry cell `phases`,
-`counters`, `census`, `timeline`, `roofline`). A worktree without a `declare.py` predates the declaration API and is not
+its clock reader and its DIFF SIDES (`SURFACES`: the fp64 oracle, the producer reference, the carry kernel, each over
+the cells of its kind and tier); the target alone also declares its instruments (`sass`, `registers`, and per carry cell
+`phases`, `counters`, `census`, `timeline`, `roofline`) and its own kernel-vs-oracle diff. For each surface and each
+reference, the root declares ONE DIFF (`rola_devtools.diff`) of the two checkouts' sides under the rule the target
+states for that surface -- the crown jewels' dual run, and kernel-vs-kernel conformance -- stored at `diff/<surface>`;
+`jewels` is the group over them. A worktree without a `declare.py` predates the declaration API and is not
 compared.
 
 `attention.py` is rola-bench's own entry: `flash`, causal attention through torch's forced flash backend on every QKV
-cell of the selected groups, registered in the target's venv.
+cell of every group, registered in the target's venv.
 
 ## Groups and sessions (`groups.py`)
 

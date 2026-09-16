@@ -1,21 +1,25 @@
 """ROLA-BENCH'S ROOT: rola checkouts and the libraries they are compared against, measured as one declared build.
 
-    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --arg groups=gate
+    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --only 'session/attention/*'
     python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \\
-        [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg groups=all|gate|a,b] [--arg cells=all|a,b] \\
-        [--arg skip_cells=a,b] [--arg parts=instruments,memory,null,sessions] [--arg instruments=all|sass,phases,...] \\
-        [--arg attention=yes|no] [--arg rounds=8] [--arg reps=11] [--arg warmup=10] [--arg store_root=DIR]
+        [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \\
+        [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]...
+    python -m rola_devtools.build run  declare.py:jewels --arg target=... --arg references=...   # the dual run
 
 Run it with a python that has rola-devtools and rola-results (the target's venv does). A TARGET is a rola checkout and
 the venv that runs it; `references` adds others, `;`-separated. Each checkout's own `declare.py` is loaded by path and
-called under its label's scope with the selected cells and one shared timing server: its build, machine facts and
-timing registrations, and for the target alone its instruments (`parts`, `instruments`). A checkout without a
+called under its label's scope with one shared timing server: its build, machine facts, timing registrations and its
+diff SIDES, and for the target alone its instruments and its own kernel-vs-oracle diff. THE ROOT DECLARES EVERYTHING
+and takes no selector: which of it a build runs is pruned by label at the CLI (`--only`, `--skip`), which knows nothing
+of cells, groups or parts. A checkout without a
 `declare.py` predates the declaration API and is not compared. Every central cell is a NODE the checkouts share
 (`rola_devtools.cells.declare`), and a target that runs on cells takes those nodes as its data inputs. rola-bench's own
 entry is the attention reference
 (`rola_bench/measure/attention.py`'s `flash`), registered on the groups' QKV cells in the target's venv.
 
-For each selected group (`rola_bench/measure/groups.py`) and each arm set it times together, one SESSION
+For each surface the target exposes (its `SURFACES`) and each reference, one DIFF of the two checkouts' sides under the
+rule the target states for that surface -- the crown jewels' dual run and kernel-vs-kernel conformance, stored at
+`diff/<surface>`. For each group (`rola_bench/measure/groups.py`) and each arm set it times together, one SESSION
 (`measure_timing`) over every checkout's registration of those arms on the group's cells, the target's clock reader
 proving the clock; one MEMORY pass over every registration on every selected cell; a NULL GATE over the target's
 `carry_forward` on each group's first RoLA cell, its entries timed against copies of themselves in second workers, so a
@@ -42,7 +46,6 @@ from rola_devtools.timing.declare import (
 
 HERE = Path(__file__).resolve().parent
 BENCH = "bench"
-PARTS = ("instruments", "memory", "null", "sessions")
 
 
 def _cells_of(registration) -> set:
@@ -68,14 +71,12 @@ def checkout(spec: str) -> dict:
     return {"worktree": worktree, "python": str(venv / "bin" / "python"), "label": label}
 
 
-def root(g, target: str, references: str = "", groups: str = "all", cells: str = "all", skip_cells: str = "",
-         parts: str = ",".join(PARTS), instruments: str = "all", attention: str = "yes", rounds: str = "8",
-         reps: str = "11", warmup: str = "10", store_root: str = "") -> dict:
+def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "11", warmup: str = "10",
+         store_root: str = "") -> dict:
+    """EVERY target the suite has over these checkouts; a build that wants fewer prunes by label (`--only`, `--skip`)."""
     from rola_devtools.cells import central
+    from rola_devtools.diff import diff
 
-    chosen_parts = set(filter(None, parts.split(",")))
-    if chosen_parts - set(PARTS):
-        raise SystemExit(f"parts takes {PARTS}, got {sorted(chosen_parts - set(PARTS))}")
     checkouts = [checkout(target), *(checkout(spec) for spec in filter(None, references.split(";")))]
     labels = [c["label"] for c in checkouts]
     if len(set(labels)) != len(labels):
@@ -83,67 +84,76 @@ def root(g, target: str, references: str = "", groups: str = "all", cells: str =
 
     group_file = load(HERE / "rola_bench" / "measure" / "groups.py")
     registry = central()
-    skip = set(filter(None, skip_cells.split(",")))
-    narrowed = None if cells == "all" else set(cells.split(","))
-    selected = []
-    for group in group_file["select"](groups):
+    groups = group_file["select"]("all")
+    for group in groups:
         group_file["check"](group, registry)
-        kept = tuple(c for c in group.cells if c not in skip and (narrowed is None or c in narrowed))
-        if kept:
-            selected.append((group, kept))
-    names = list(dict.fromkeys(c for _group, kept in selected for c in kept))
+    names = list(dict.fromkeys(c for group in groups for c in group.cells))
 
-    timing = bool(chosen_parts & {"memory", "null", "sessions"})
-    server = start_timing_server(g) if timing else None
+    server = start_timing_server(g)
     root_dir = store_root or None
     entries: dict[str, list] = {}
-    stores, clock, null_entry = [], None, None
+    stores, clock, null_entry, declared_by = [], None, None, {}
     for i, c in enumerate(checkouts):
         declared = load(c["worktree"] / "declare.py")
-        subject = i == 0
-        if subject and "instruments" in chosen_parts:
-            which = {} if instruments == "all" else {"instruments": [n for n in instruments.split(",") if n]}
-        else:
-            which = {"instruments": ()}
+        #: the TARGET declares its instruments and its own kernel-vs-oracle diff; a reference is what it is compared
+        #: against, so it declares its sides and its timing arms and nothing it would measure about itself
+        which = {} if i == 0 else {"instruments": ()}
         out = declared["declare"](g.scoped(c["label"]), declared["checkout"](c["worktree"], python=c["python"],
-                                                                             label=c["label"]),
-                                  cells=names, timing=server, **which)
+                                                                             label=c["label"]), timing=server, **which)
+        declared_by[c["label"]] = (declared, out)
         for arm, registration in out["entries"].items():
             entries.setdefault(arm, []).append(registration)
         for name, instrument in out["instruments"].items():
             stores.append(store(g, f"{c['label']}/store/{name}", source=instrument, location=f"rola/{name}",
                                 cache=instrument.cache, root=root_dir))
+        for name, verdict in out["diffs"].items():
+            stores.append(store(g, f"{c['label']}/store/{name}", source=verdict, location=f"rola/{name}", root=root_dir))
         clock = clock or out["clock"]
         null_entry = null_entry or out["entries"].get("carry_forward")
+
+    #: THE CROSS-CHECKOUT DIFFS: each surface the target exposes, against the same surface in each reference, under the
+    #: rule the target's own declarations state for it -- the crown jewels' dual run, and kernel-vs-kernel, as targets
+    subject_decl, subject = declared_by[labels[0]]
+    jewels = []
+    for label in labels[1:]:
+        _decl, other = declared_by[label]
+        for surface, (_exec, _kind, _tier, _holds, strategy, params) in subject_decl["SURFACES"].items():
+            left, right = subject["sides"][surface], other["sides"].get(surface)
+            if right is None:
+                continue
+            verdict = diff(g, f"diff/{surface}/{label}", left=left, right=right, strategy=strategy, params=params,
+                           minimum=len(left.inputs))
+            jewels.append(verdict)
+            stores.append(store(g, f"store/diff/{surface}/{label}", source=verdict, location=f"diff/{surface}",
+                                root=root_dir))
+
     qkv = [c for c in names if registry.cell(c)["data"].split(":")[0].rsplit(".", 1)[-1] == "qkv"]
-    if timing and attention == "yes" and qkv:
+    if qkv:
         bench = Env(BENCH, checkouts[0]["python"], str(HERE), {"PYTHONPATH": str(HERE)})
         entries["flash"] = [register_timing(g, f"{BENCH}/flash", server=server, env=bench,
                                             executor="rola_bench.measure.attention:flash", cells=cell_nodes(g, qkv),
                                             code={"entry": "rola_bench/measure/attention.py", "roots": ["."]})]
 
     measured = []
-    if "sessions" in chosen_parts:
-        for group, kept in selected:
-            for arms in group.together:
-                members = [r for arm in arms for r in entries.get(arm, ()) if _cells_of(r) & set(kept)]
-                if not members:
-                    continue
-                name = f"{group.name}/{'+'.join(arms)}"
-                session = measure_timing(g, f"session/{name}", server=server, entries=members, clock=clock, cells=kept,
-                                         rounds=int(rounds), reps=int(reps), warmup=int(warmup))
-                measured.append(session)
-                stores.append(store(g, f"store/session/{name}", source=session, location="timing/session", root=root_dir))
+    for group in groups:
+        for arms in group.together:
+            members = [r for arm in arms for r in entries.get(arm, ()) if _cells_of(r) & set(group.cells)]
+            if not members:
+                continue
+            name = f"{group.name}/{'+'.join(arms)}"
+            session = measure_timing(g, f"session/{name}", server=server, entries=members, clock=clock,
+                                     cells=group.cells, rounds=int(rounds), reps=int(reps), warmup=int(warmup))
+            measured.append(session)
+            stores.append(store(g, f"store/session/{name}", source=session, location="timing/session", root=root_dir))
     on_gate = set() if null_entry is None else _cells_of(null_entry)
-    null_cells = [next(c for c in kept if c in on_gate) for _group, kept in selected if set(kept) & on_gate]
-    if "null" in chosen_parts and null_cells:
+    null_cells = [next(c for c in group.cells if c in on_gate) for group in groups if set(group.cells) & on_gate]
+    if null_cells:
         gate = measure_null_gate(g, "null", server=server, entry=null_entry, clock=clock, cells=null_cells,
                                  rounds=int(rounds), reps=int(reps), warmup=int(warmup))
         measured.append(gate)
         stores.append(store(g, "store/null", source=gate, location="timing/null", root=root_dir))
-    if "memory" in chosen_parts and entries:
-        memory = measure_memory(g, "memory", server=server, entries=[r for rs in entries.values() for r in rs], cells=names)
-        measured.append(memory)
-        stores.append(store(g, "store/memory", source=memory, location="timing/memory", root=root_dir))
-    terminal = [*stores, stop_timing_server(g, server=server, after=[*measured, *stores])] if timing else stores
-    return {"suite": g.group("suite", terminal)}
+    memory = measure_memory(g, "memory", server=server, entries=[r for rs in entries.values() for r in rs], cells=names)
+    measured.append(memory)
+    stores.append(store(g, "store/memory", source=memory, location="timing/memory", root=root_dir))
+    stop = stop_timing_server(g, server=server, after=[*measured, *stores])
+    return {"suite": g.group("suite", [*stores, stop]), "jewels": g.group("jewels", jewels)}

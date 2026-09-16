@@ -32,13 +32,23 @@ FAKE = textwrap.dedent('''
         return Env(label, python, str(path))
 
 
-    def declare(g, env, *, cells, timing=None, instruments=("sass", "phases")):
+    SURFACES = {"oracle": ("fake:side", "carry", "oracle", {"host_cpu": "all"}, "bit-identical", {})}
+
+
+    def declare(g, env, *, timing=None, instruments=("sass", "phases")):
+        from rola_devtools.cells import central
+        from rola_devtools.diff import side
+
+        cells = sorted(central().cells)
+        carry = [c for c in cells if not c.startswith(("qkv-", "layer-", "producer-"))]
         binary = g.node("binary", executor="fake:build", env=env)
+        oracle = [c for c in carry if central().cell(c)["params"].get("tier") == "oracle"]
         out = {"binary": binary, "entries": {}, "clock": None,
-               "instruments": {n: g.node(n, executor="fake:tool", env=env, deps={"binary": binary}) for n in instruments}}
+               "instruments": {n: g.node(n, executor="fake:tool", env=env, deps={"binary": binary}) for n in instruments},
+               "sides": {"oracle": side(g, "side/oracle", env=env, executor="fake:side", cells=cell_nodes(g, oracle))},
+               "diffs": {}}
         if timing is None:
             return out
-        carry = [c for c in cells if not c.startswith(("qkv-", "layer-"))]
         out["entries"]["carry_forward"] = register_timing(g, "carry_forward", server=timing, env=env,
                                                           executor="fake:timed", cells=cell_nodes(g, carry),
                                                           deps={"binary": binary})
@@ -85,7 +95,7 @@ class Root(unittest.TestCase):
         return public, g.targets
 
     def test_a_group_is_one_session_per_arm_set_over_every_checkouts_registration_and_the_reference(self):
-        public, targets = self.root(references=f"worktree:{self.base / 'base'},label:master", groups="gate")
+        public, targets = self.root(references=f"worktree:{self.base / 'base'},label:master")
         flagship = GROUPS["GROUPS"]["L1024-N65536-dv64"]
         session = targets["session/L1024-N65536-dv64/carry_forward+flash"]
         members = {d.label for role, d in session.deps.items() if role.startswith("r")}
@@ -99,21 +109,44 @@ class Root(unittest.TestCase):
         self.assertEqual({k: stored[k] for k in ("tip/store/phases", "store/memory")},
                          {"tip/store/phases": "tip/phases", "store/memory": "memory"})
         gate = targets["null"]
-        self.assertEqual((gate.deps["r0"].label, gate.params["cells"]),
-                         ("tip/carry_forward", ["nl64k-dense", "flagship-dense"]))
+        #: the null gate takes the FIRST carry cell of every group the target's carry_forward registers on: one
+        #: cell a group, so a worker's bias is read once per group's shape and never per cell
+        with_carry = [g for g in GROUPS["GROUPS"].values() if any(not c.startswith(("qkv-", "layer-")) for c in g.cells)]
+        self.assertEqual(gate.deps["r0"].label, "tip/carry_forward")
+        self.assertEqual(gate.params["cells"], [next(c for c in g.cells if not c.startswith(("qkv-", "layer-")))
+                                                for g in with_carry])
         stop = targets["timing-server-stop"]
         self.assertTrue(stop.always_run)
         self.assertIn(targets["store/memory"], stop.deps.values())
-        self.assertEqual(set(public), {"suite"})
+        self.assertEqual(set(public), {"suite", "jewels"})
 
-    def test_the_parts_and_cells_narrow_what_is_declared(self):
-        _public, targets = self.root(groups="gate", parts="instruments", cells="flagship-dense")
-        self.assertNotIn("timing-server", targets)
-        self.assertIn("tip/phases", targets)
-        self.assertFalse(any(label.startswith("session/") for label in targets))
-        _public, targets = self.root(groups="gate", skip_cells="nl64k-dense,nl64k-alt-k4,qkv-L65536-dv64", parts="sessions")
-        self.assertEqual(sorted(label for label in targets if label.startswith("session/")),
-                         ["session/L1024-N65536-dv64/carry_forward+flash", "session/L1024-N65536-dv64/carry_intra+flash"])
+    def test_the_root_takes_no_selector_and_a_build_prunes_it_by_label(self):
+        """The root declares EVERYTHING; `--only`/`--skip` at the CLI is the one way to run less of it."""
+        import inspect
+
+        from rola_devtools.build.scheduler import select
+
+        self.assertFalse({"cells", "skip_cells", "parts", "groups", "instruments"}
+                         & set(inspect.signature(SUITE["root"]).parameters))
+        public, targets = self.root()
+        #: a session per group arm set that has a member -- every group, not a gate subset; the double registers
+        #: only `carry_forward` and `flash`, so the arm sets naming other arms declare nothing
+        sessions = {label for label in targets if label.startswith("session/")}
+        expected = {f"session/{g.name}/{'+'.join(arms)}" for g in GROUPS["GROUPS"].values() for arms in g.together
+                    if set(arms) & {"carry_forward", "flash"}}
+        self.assertEqual(sessions, expected)
+        only = select([public["suite"]], only=["tip/phases"])
+        self.assertEqual([t.label for t in only], ["tip/binary", "tip/phases"])
+
+    def test_each_surface_the_target_exposes_is_diffed_against_each_reference_under_its_own_rule(self):
+        public, targets = self.root(references=f"worktree:{self.base / 'base'},label:master")
+        verdict = targets["diff/oracle/master"]
+        self.assertEqual((verdict.deps["left"].label, verdict.deps["right"].label), ("tip/side/oracle", "master/side/oracle"))
+        self.assertEqual((verdict.params["strategy"], verdict.params["minimum"]),
+                         ("bit-identical", len(targets["tip/side/oracle"].inputs)))
+        self.assertEqual(targets["store/diff/oracle/master"].params["location"], "diff/oracle")
+        self.assertEqual([t.label for t in public["jewels"].deps.values()], ["diff/oracle/master"])
+        self.assertNotIn("diff/oracle/tip", targets)
 
     def test_a_checkout_without_declarations_or_with_a_taken_label_is_refused(self):
         (self.base / "base" / "declare.py").unlink()
