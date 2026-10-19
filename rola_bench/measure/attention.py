@@ -35,7 +35,6 @@ def flash(cell, params):
     from rola_devtools.cells.qkv import QKVCell, realize
     from rola_devtools.timing import Timed
     from torch.nn.attention import SDPBackend, current_flash_attention_impl, sdpa_kernel
-    from torch.nn.attention.bias import causal_lower_right
 
     if not isinstance(cell, QKVCell):
         raise TypeError(f"the attention reference takes a QKV cell (rola_devtools.cells.qkv), got {type(cell).__name__}")
@@ -62,16 +61,20 @@ def flash(cell, params):
         if q is not None:
             cache_k[:, :, context:] = k
             cache_v[:, :, context:] = v
-        mask = causal_lower_right(c, context + c) if cell.causal else None
     if hidden:
         x = draw(b, c, hidden)
         w = draw(hidden, 3 * heads * dv, scale=hidden ** -0.5)
 
+    #: the chunk over the cache: torch's own flash op, whose `is_causal` is bottom-right -- the op torch's
+    #: `causal_lower_right` dispatches to, called directly because that bias is a tensor subclass whose construction
+    #: allocates an uninitialized c x (T + c) host tensor (36 GB at T = 1M, c = 16K)
     def attend(query):
         with torch.no_grad(), sdpa_kernel(SDPBackend.FLASH_ATTENTION):
             if not (context or hidden):
                 return F.scaled_dot_product_attention(q, k, v, is_causal=cell.causal)
-            return F.scaled_dot_product_attention(query, cache_k, cache_v, attn_mask=mask)
+            return torch.ops.aten._scaled_dot_product_flash_attention(query, cache_k, cache_v, 0.0,
+                                                                      is_causal=cell.causal, return_debug_mask=False,
+                                                                      scale=dv ** -0.5)[0]
 
     def launch():
         if not hidden:
