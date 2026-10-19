@@ -10,6 +10,10 @@ registry. The root (`declare.py`) loads this file by path.
                                                 `carry_intra` each timed beside `flash`
     layer(construction, cell)                   a layer input under one of RoLA's constructions; its solve and its
                                                 decode step each timed alone
+    incremental(chunk, dv, contexts, ...)       THE INCREMENTAL CELL (ruled 2026-10-18): c = `chunk` new tokens after
+                                                each context T, FlashAttention over the T + c KV cache (with `hidden`,
+                                                its QKV projection for `heads` heads too), every context in one session;
+                                                RoLA's side joins once its carry starts from a stored state
 
 `GATE` names the groups the kernel's gate reads first. The capacity-fair comparison is at N = L (rola's
 docs/measurement.md); a group's claim says whether its RoLA cells' state count equals their tokens.
@@ -29,6 +33,8 @@ class Group:
     cells: tuple[str, ...]
     together: tuple[tuple[str, ...], ...]
     states: int | None = None
+    #: the attention reference's arms this group registers itself: (arm, its parameters)
+    flash_arms: tuple[tuple[str, dict], ...] = ()
 
 
 def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...]) -> Group:
@@ -38,6 +44,18 @@ def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...]) ->
                  f"N = {states} ({fair})",
                  ("tokens", "dv"), (*rola_cells, f"qkv-L{tokens}-dv{dv}"),
                  (("carry_forward", "flash"), ("carry_intra", "flash")), states)
+
+
+def incremental(chunk: int, dv: int, contexts: tuple[int, ...], hidden: int = 0, heads: int = 1) -> Group:
+    level = f"-h{hidden}x{heads}" if hidden else ""
+    arms = tuple((f"flash@T={t}" + (f",h={hidden}x{heads}" if hidden else ""),
+                  {"context": t, **({"hidden": hidden, "heads": heads} if hidden else {})}) for t in contexts)
+    what = (f"with its QKV projection from hidden {hidden} for {heads} heads in one GEMM" if hidden
+            else "attention alone, one head")
+    return Group(f"inc-c{chunk}-dv{dv}{level}",
+                 f"{chunk} new tokens after T = {', '.join(map(str, contexts))} absorbed, value width {dv}, bf16: "
+                 f"FlashAttention over the T + c cache, bottom-right causal, {what}",
+                 ("tokens", "dv"), (f"qkv-L{chunk}-dv{dv}",), (tuple(a for a, _ in arms),), None, arms)
 
 
 def layer(construction: str, cell: str) -> Group:
@@ -77,6 +95,8 @@ GROUPS = {g.name: g for g in (
     layer("chunk-deep-D4-w8", "layer-B2-T512-H8-h512-dv64-bf16-s3"),
     layer("chunk-decode-w16", "layer-B2-T128-H2-h128-dv64-fp32-s4-dec8"),
     layer("chunk-decode-la-w256", "layer-B2-T128-H2-h128-dv64-fp32-s10-dec8"),
+    *(incremental(c, 64, (0, 4096, 16384, 65536, 262144, 1048576)) for c in (1024, 4096, 16384)),
+    *(incremental(c, 64, (0, 4096, 16384, 65536, 262144), hidden=2048, heads=16) for c in (1024, 4096)),
 )}
 GATE = ("L65536-N65536-dv64", "L1024-N65536-dv64")
 

@@ -130,10 +130,11 @@ class Root(unittest.TestCase):
                          & set(inspect.signature(SUITE["root"]).parameters))
         public, targets = self.root()
         #: a session per group arm set that has a member -- every group, not a gate subset; the double registers
-        #: only `carry_forward` and `flash`, so the arm sets naming other arms declare nothing
+        #: only `carry_forward`, rola-bench `flash` and each group's own attention arms (the incremental cell's), so
+        #: the arm sets naming other arms declare nothing
         sessions = {label for label in targets if label.startswith("session/")}
         expected = {f"session/{g.name}/{'+'.join(arms)}" for g in GROUPS["GROUPS"].values() for arms in g.together
-                    if set(arms) & {"carry_forward", "flash"}}
+                    if set(arms) & ({"carry_forward", "flash"} | {a for a, _ in g.flash_arms})}
         self.assertEqual(sessions, expected)
         only = select([public["suite"]], only=["tip/phases"])
         self.assertEqual([t.label for t in only], ["tip/binary", "tip/phases"])

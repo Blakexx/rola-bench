@@ -150,9 +150,21 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
     qkv = [c for c in names if registry.cell(c)["data"].split(":")[0].rsplit(".", 1)[-1] == "qkv"]
     if qkv:
         bench = Env(BENCH, checkouts[0]["python"], str(HERE), {"PYTHONPATH": str(HERE)})
+        code = {"entry": "rola_bench/measure/attention.py", "roots": ["."]}
         entries["flash"] = [register_timing(g, f"{BENCH}/flash", server=server, env=bench,
                                             executor="rola_bench.measure.attention:flash", cells=cell_nodes(g, qkv),
-                                            code={"entry": "rola_bench/measure/attention.py", "roots": ["."]})]
+                                            code=code)]
+        #: THE INCREMENTAL CELL's arms: each (T, projection) one registration of the reference with its parameters,
+        #: on every cell of the groups that name it
+        arms: dict[str, tuple[dict, list]] = {}
+        for group in groups:
+            for arm, params in group.flash_arms:
+                on = arms.setdefault(arm, (params, []))[1]
+                on += [c for c in group.cells if c in qkv and c not in on]
+        for arm, (params, on) in arms.items():
+            entries[arm] = [register_timing(g, f"{BENCH}/{arm}", server=server, env=bench,
+                                            executor="rola_bench.measure.attention:flash", cells=cell_nodes(g, on),
+                                            params=params, code=code)]
 
     measured = []
     for group in groups:
