@@ -11,6 +11,9 @@ registry. The root (`declare.py`) loads this file by path.
                                                 heads every cell draws a call
     layer(construction, cell)                   a layer input under one of RoLA's constructions; its solve and its
                                                 decode step each timed alone
+    layer_prefill(construction, cell, ...)      THE LAYER-LEVEL PREFILL: RoLA's stateless prefill (the producer and
+                                                the op) beside FlashAttention with its QKV projection, one session; the
+                                                producer's launch in its own
     incremental(chunk, dv, contexts, ...)       THE INCREMENTAL CELL (ruled 2026-10-18): c = `chunk` new tokens after
                                                 each context T, FlashAttention over the T + c KV cache (with `hidden`,
                                                 its QKV projection for `heads` heads too), every context in one session;
@@ -72,6 +75,18 @@ def layer(construction: str, cell: str) -> Group:
                  ((f"entmax_solve@layer={construction}",), (f"decode_step@layer={construction}",)))
 
 
+def layer_prefill(construction: str, cell: str, tokens: int, dv: int, hidden: int, heads: int) -> Group:
+    flash = f"flash@T=0,h={hidden}x{heads}"
+    suffix = "" if heads == 1 else f"-h{heads}"
+    return Group(f"layer-prefill-{construction}",
+                 f"the layer input {cell} under RoLA's construction {construction}: its stateless prefill (the "
+                 f"producer and the op) beside FlashAttention with its QKV projection from hidden {hidden} for "
+                 f"{heads} heads, the output projection outside both; the producer's launch alone",
+                 ("tokens", "dv"), (cell, f"qkv-L{tokens}-dv{dv}{suffix}"),
+                 ((f"produce@layer={construction}",), (f"layer_prefill@layer={construction}", flash)), None,
+                 ((flash, {"hidden": hidden, "heads": heads}),))
+
+
 GROUPS = {g.name: g for g in (
     attention(16, 256, 64, ("identity-passthrough-dense", "identity-passthrough-paged", "single-deposit")),
     attention(32, 256, 64, ("one-box-tiny",)),
@@ -105,6 +120,8 @@ GROUPS = {g.name: g for g in (
     layer("chunk-deep-D4-w8", "layer-B2-T512-H8-h512-dv64-bf16-s3"),
     layer("chunk-decode-w16", "layer-B2-T128-H2-h128-dv64-fp32-s4-dec8"),
     layer("chunk-decode-la-w256", "layer-B2-T128-H2-h128-dv64-fp32-s10-dec8"),
+    *(layer_prefill(c, "layer-B1-T65536-H4-h256-dv64-bf16-s11", 65536, 64, 256, 4)
+      for c in ("nl64k-alt-h4", "nl64k-alt-h4-g4", "nl64k-alt-h4-g16")),
     *(incremental(c, 64, (0, 4096, 16384, 65536, 262144, 1048576)) for c in (1024, 4096, 16384)),
     *(incremental(c, 64, (0, 4096, 16384, 65536, 262144), hidden=2048, heads=16) for c in (1024, 4096)),
 )}
