@@ -5,9 +5,10 @@ the parameters every cell of the group carries with one value; and `together`, t
 over the group's cells, in every checkout a run measures. `check` holds a group to its claim against the central
 registry. The root (`declare.py`) loads this file by path.
 
-    attention(tokens, states, dv, rola_cells)   RoLA's carry cells of one length, state count N and value width beside
-                                                the attention cell of that length and width; `carry_forward` and
-                                                `carry_intra` each timed beside `flash`
+    attention(tokens, states, dv, cells, heads) RoLA's carry cells of one length, state count N and value width beside
+                                                the attention cell of that length and width; each arm of
+                                                `ATTENTION_ARMS` timed beside `flash` in its own session; `heads` the
+                                                heads every cell draws a call
     layer(construction, cell)                   a layer input under one of RoLA's constructions; its solve and its
                                                 decode step each timed alone
     incremental(chunk, dv, contexts, ...)       THE INCREMENTAL CELL (ruled 2026-10-18): c = `chunk` new tokens after
@@ -35,15 +36,23 @@ class Group:
     states: int | None = None
     #: the attention reference's arms this group registers itself: (arm, its parameters)
     flash_arms: tuple[tuple[str, dict], ...] = ()
+    #: the heads a call draws, every cell of the group alike (RoLA's write heads, attention's heads)
+    heads: int = 1
 
 
-def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...]) -> Group:
+#: RoLA's arms an attention group times, EACH IN ITS OWN SESSION beside `flash`: a session holds every member set up at
+#: once, so one RoLA arm a session bounds the device memory a group needs
+ATTENTION_ARMS = ("carry_forward", "carry_intra", "intra_forward", "den_pass", "prefill")
+
+
+def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...], heads: int = 1) -> Group:
     fair = "N = L, capacity-fair" if states == tokens else f"N {'>' if states > tokens else '<'} L, not capacity-fair"
-    return Group(f"L{tokens}-N{states}-dv{dv}",
-                 f"{tokens} tokens and value width {dv}, bf16, attention one head of width {dv}; RoLA's state "
-                 f"N = {states} ({fair})",
-                 ("tokens", "dv"), (*rola_cells, f"qkv-L{tokens}-dv{dv}"),
-                 (("carry_forward", "flash"), ("carry_intra", "flash")), states)
+    suffix = "" if heads == 1 else f"-h{heads}"
+    return Group(f"L{tokens}-N{states}-dv{dv}{suffix}",
+                 f"{tokens} tokens and value width {dv}, bf16, attention {'one head' if heads == 1 else f'{heads} heads'}"
+                 f" of width {dv}; RoLA's state N = {states} a head ({fair})",
+                 ("tokens", "dv"), (*rola_cells, f"qkv-L{tokens}-dv{dv}{suffix}"),
+                 tuple((arm, "flash") for arm in ATTENTION_ARMS), states, heads=heads)
 
 
 def incremental(chunk: int, dv: int, contexts: tuple[int, ...], hidden: int = 0, heads: int = 1) -> Group:
@@ -84,6 +93,7 @@ GROUPS = {g.name: g for g in (
     attention(16384, 65536, 64, ("flagship-dense-L16384", "flagship-alt-k16-L16384", "flagship-alt-k4-L16384",
                                  "flagship-cohort-k16-L16384")),
     attention(65536, 65536, 64, ("nl64k-dense", "nl64k-alt-k4")),
+    attention(65536, 65536, 64, ("nl64k-dense-h4", "nl64k-alt-k4-h4"), heads=4),
     layer("chunk-p73-pinned", "layer-B2-T2048-H8-h512-dv64-bf16-s0"),
     layer("chunk-sparse-gain8", "layer-B2-T512-H8-h512-dv64-bf16-s1"),
     layer("chunk-deadblocks-T64", "layer-B2-T64-H8-h512-dv64-bf16-s5"),
@@ -103,7 +113,8 @@ GATE = ("L65536-N65536-dv64", "L1024-N65536-dv64")
 
 def check(group: Group, registry) -> None:
     """Refuses a group whose cells the registry lacks or whose cells break its claim: an `equal` parameter with two
-    values, a RoLA cell whose state count is not the group's N, an attention cell that is not one bf16 head."""
+    values, a RoLA cell whose state count is not the group's N, a cell drawing other than the group's heads, an
+    attention cell that is not bf16."""
     missing = sorted(set(group.cells) - set(registry.cells))
     if missing:
         raise KeyError(f"group {group.name} names cells the central registry does not hold: {missing}")
@@ -117,8 +128,10 @@ def check(group: Group, registry) -> None:
     for c, p in params.items():
         if "widths" in p and math.prod(p["widths"]) != group.states:
             raise ValueError(f"group {group.name} claims N = {group.states}, but {c} has {math.prod(p['widths'])} states")
-        if "heads" in p and (p["heads"], p["dtype"]) != (1, "bfloat16"):
-            raise ValueError(f"group {group.name} claims one bf16 attention head, but {c} is {p['heads']} x {p['dtype']}")
+        if p.get("heads", 1) != group.heads:
+            raise ValueError(f"group {group.name} claims {group.heads} head(s) a call, but {c} draws {p.get('heads', 1)}")
+        if "dtype" in p and p["dtype"] != "bfloat16":
+            raise ValueError(f"group {group.name} claims bf16 attention, but {c} is {p['dtype']}")
 
 
 def select(names: str) -> list[Group]:
