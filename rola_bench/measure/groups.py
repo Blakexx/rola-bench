@@ -45,7 +45,7 @@ class Group:
 
 #: RoLA's arms an attention group times, EACH IN ITS OWN SESSION beside `flash`: a session holds every member set up at
 #: once, so one RoLA arm a session bounds the device memory a group needs
-ATTENTION_ARMS = ("carry_forward", "carry_intra", "intra_forward", "den_pass", "prefill")
+ATTENTION_ARMS = ("carry_forward", "carry_intra", "intra_forward", "scale_pass", "prefill")
 
 
 def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...], heads: int = 1) -> Group:
@@ -77,7 +77,7 @@ def layer(construction: str, cell: str) -> Group:
 
 #: the op's stages a layer-prefill group times on the layer's own bundle, EACH IN ITS OWN SESSION (one RoLA arm a session
 #: bounds the device memory, as `ATTENTION_ARMS`): together with `produce` they split the layer's time by launch
-LAYER_STAGES = ("layer_facts", "layer_den", "layer_carry", "layer_intra", "layer_op")
+LAYER_STAGES = ("layer_facts", "layer_scale", "layer_carry", "layer_intra", "layer_op")
 
 
 def layer_prefill(construction: str, cell: str, tokens: int, dv: int, hidden: int, heads: int) -> Group:
