@@ -5,6 +5,7 @@
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \\
         [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]...
     python -m rola_devtools.build run  declare.py:diffs --arg target=... --arg references=...   # the dual run
+        [--arg record=oracle]      # an intended change to a surface: its verdict recorded, not a build failure
 
 Run it with a python that has rola-devtools and rola-results (the target's venv does). A TARGET is a rola checkout and
 the venv that runs it; `references` adds others, `;`-separated. Each checkout's own `declare.py` is loaded by path and
@@ -91,8 +92,12 @@ RULES = {
 
 
 def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "11", warmup: str = "10",
-         store_root: str = "") -> dict:
-    """EVERY target the suite has over these checkouts; a build that wants fewer prunes by label (`--only`, `--skip`)."""
+         store_root: str = "", record: str = "") -> dict:
+    """EVERY target the suite has over these checkouts; a build that wants fewer prunes by label (`--only`, `--skip`).
+
+    ``record`` names the surfaces (comma-separated) whose cross-checkout verdict is RECORDED rather than failing the
+    build: an INTENDED change to a surface (an oracle redefinition) is shown -- each cell's worst slot a quantity, and
+    the cells one side refuses -- not stopped at its first difference. Every other surface keeps its gate."""
     from rola_devtools.cells import central
     from rola_devtools.diff import diff
 
@@ -142,7 +147,8 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
                 continue
             strategy, params = RULES[surface](subject_decl.get("NUMERICS", {}).get(surface, {}))
             verdict = diff(g, f"diff/{surface}/{label}", left=left, right=right, strategy=strategy, params=params,
-                           minimum=len(left.inputs))
+                           minimum=len(left.inputs),
+                           on_difference="record" if surface in record.split(",") else "fail")
             kept = store(g, f"store/diff/{surface}/{label}", source=verdict, location=f"diff/{surface}", root=root_dir)
             stores.append(kept)
             diffs.append(kept)  #: the group runs the diff AND files its verdict
