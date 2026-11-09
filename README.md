@@ -60,7 +60,7 @@ a box-side command, and `rola_bench.fleet.jobs.make_job` assembles the `fleet.Jo
 | `mqar` | Recall accuracy at matched realized state: RoLA's wirings against zoology's baselines across N, L, learning rates and seeds. | `canonical`, `law_grid`, `graph_grid`, `presence_grid`, `cue_consistency`, `ood_recall`, `separation`, `dmodel64`, `router_bias`; `seed_confirm.py` (re-runs the winners at extra seeds) |
 
 ```bash
-python -m rola_bench.fleet mqar canonical --boxes 6
+bazel run //:fleet -- <rola checkout> mqar canonical --boxes 6
 ```
 
 The launcher runs CPU-only: it builds the job and coordinates the boxes over HTTP, and every run happens on the rented
@@ -74,27 +74,39 @@ GPUs. It reads this machine's environment:
 
 ## Local runs
 
-The MQAR smoke builds every arm on this machine's GPU and runs one step:
+Everything runs through Bazel (`bazel run`, its arguments after `--`, in this checkout), on one of the workspace's two
+environments. Each is built once from its lock into the machine's shared store (`MODULE.bazel`), with the packages no
+index serves pinned by their public commits:
+
+| Environment | Its stack | Its interpreter |
+|---|---|---|
+| `bench_env` | torch 2.14 (CUDA 13.0, rola's), the fla fork's rola branch, zoology, fleet, rola-results (`requirements.lock`) | `bazel run //:bench_python -- <args>` |
+| `research_env` | the baselines' stack: torch 2.6 (CUDA 12.4), flash-attn's release wheel, upstream fla 0.4.2, zoology, fleet (`research.lock`) | `bazel run //:research_python -- <args>` |
+
+rola is never installed: a run that imports it (the arms registry does, so the launcher, the MQAR runs and the model
+tests) takes a rola checkout as its first argument, with that checkout's library built (`bazel run //:library` there),
+and puts it on the path after this one. The MQAR smoke builds every arm on this machine's GPU and runs one step:
 
 ```bash
-python -m rola_bench.mqar.smoke
+bazel run //:mqar_smoke -- <rola checkout>
 ```
 
 An MQAR-family grid small enough for this card runs one tier at a time through the fleet's own cell runner, and the
 graph and presence grids are read by their analysis:
 
 ```bash
-GRID_TIERS=decoupling python -m rola_bench.mqar.local_grid --config graph_grid --dry-run
-python -m rola_bench.mqar.analysis.graph --config graph_grid
+GRID_TIERS=decoupling bazel run //:mqar_local_grid -- <rola checkout> --config graph_grid --dry-run
+bazel run //:bench_python -- -m rola_bench.mqar.analysis.graph --config graph_grid
 ```
 
 The measurement suite is a declared build (`declare.py`, over rola-devtools' `rola_devtools.build`): each rola
 checkout's own declarations (its build, SASS, registers, phases, pipe counters and timelines, timing entries) composed
 with rola-bench's attention reference, one interleaved timing session per group of central cells, a memory pass, and
-every result stored. See [`rola_bench/measure/README.md`](rola_bench/measure/README.md):
+every result stored. Each checkout runs in its own venv (rola's `bazel run //:dev_env` writes it beside the checkout).
+See [`rola_bench/measure/README.md`](rola_bench/measure/README.md):
 
 ```bash
-python -m rola_devtools.build run declare.py:suite --arg target=worktree:<rola checkout> \
+bazel run //:suite -- run declare.py:suite --arg target=worktree:<rola checkout> \
     --arg references='worktree:<baseline>,label:master'
 ```
 
@@ -114,13 +126,19 @@ image bump runs the grid again. Failures are samples too.
 Tests run per area. The GPU-heavy suites are never run unscoped:
 
 ```bash
-python -m pytest tests/models
-python -m pytest tests/mqar
-python -m unittest tests.measure.test_compose
+bazel run //:pytest -- <rola checkout> tests/models
+bazel run //:pytest -- <rola checkout> tests/mqar
+bazel run //:bench_python -- -m unittest tests.measure.test_compose
 ```
 
-The commit gate (`.githooks/pre-commit` -> `.pre-commit-config.yaml`) runs ruff with rola's rule set and its E30x spacing family
-over `rola_bench` and `tests`, the measurement composer's contract tests, and the public mirror's declaration check.
+The gate is `bazel test //:gate`: ruff with rola's rule set and its E30x spacing family over `rola_bench`, `tests` and
+`declare.py`, the measurement composer's contract tests, and the public mirror's declaration check, on the bench
+environment. The commit hook (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, rola-devtools' commit gate) runs
+it on the commit as git will write it.
+
+Bazel is rola's pinned bazelisk (a rola checkout's `python3 tools/bootstrap.py` links it), and it runs through this
+checkout's front door (`bazel/bazel`), which runs rola-devtools' from the machine's rola-devtools checkout (the dev
+config's `workspace.devtools`, else `rola-devtools` beside this checkout).
 
 ## Publishing
 

@@ -1,0 +1,54 @@
+"""rola-bench's build graph: its environments and its checks, on rola-devtools' module (its environment extension and
+generic rules). Nothing here names a machine; the front door (bazel/bazel) hands Bazel the machine's settings."""
+
+module(name = "rola_bench")
+
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+
+#: THE GRAPH'S SHARED MACHINERY, rola-devtools' module, at a public commit: the front door overrides it with the
+#: machine's checkout (a fresh machine clones one at this commit first)
+bazel_dep(name = "rola_devtools", version = "0.1.0")
+git_override(
+    module_name = "rola_devtools",
+    commit = "fdc13c8c2eb594396daebb2f6e35c6816158e8ce",
+    remote = "https://github.com/Blakexx/rola-devtools.git",
+)
+
+#: THE ENVIRONMENTS (rola-devtools' environment extension): the pinned uv; `bench_env`, the fork's stack on rola's
+#: torch, which the gate, the tests and the local runs import; `research_env`, the baselines' stack (torch 2.6, the
+#: flash-attn wheel, upstream fla); the tracked tree. The packages no index serves are pinned by public commit.
+environment = use_extension("@rola_devtools//bazel:environment.bzl", "environment")
+environment.pinned(
+    name = "uv",
+    build = 'exports_files(["{binary}"], visibility = ["//visibility:public"])\n',
+    pin = "@rola_devtools//pins:uv_pin.json",
+)
+environment.python(
+    name = "bench_env",
+    #: zoology's build imports torch: the packages build against the environment
+    isolated_builds = False,
+    index = "https://download.pytorch.org/whl/cu130",
+    lock = "//:requirements.lock",
+    packages = [
+        "flash-linear-attention @ git+https://github.com/Blakexx/flash-linear-attention@2b4a95dd6a0df2827a45bc38b8619203bdcebae4",
+        "zoology @ git+https://github.com/Blakexx/rola-zoology@1a3ab7affca7477548e68ee1b5ba6287cb760e5d",
+        "fleet @ git+https://github.com/Blakexx/fleet@d2b4fa3c4ba2a47d5c89c8e5c3e2dad329ff8b83",
+        "rola-results @ git+https://github.com/Blakexx/rola-results@40b41681bb4fd22f744810a3a2281c8e7c376327",
+    ],
+    uv = "@uv//:uv",
+    uv_pin = "@rola_devtools//pins:uv_pin.json",
+)
+environment.python(
+    name = "research_env",
+    isolated_builds = False,
+    index = "https://download.pytorch.org/whl/cu124",
+    lock = "//:research.lock",
+    packages = [
+        "zoology @ git+https://github.com/Blakexx/rola-zoology@1a3ab7affca7477548e68ee1b5ba6287cb760e5d",
+        "fleet @ git+https://github.com/Blakexx/fleet@d2b4fa3c4ba2a47d5c89c8e5c3e2dad329ff8b83",
+    ],
+    uv = "@uv//:uv",
+    uv_pin = "@rola_devtools//pins:uv_pin.json",
+)
+environment.tree(name = "bench_tree")
+use_repo(environment, "bench_env", "bench_tree", "research_env", "uv")

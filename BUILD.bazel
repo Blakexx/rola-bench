@@ -1,0 +1,103 @@
+"""rola-bench's root package: its checks and gate (the tracked tree beside them: rola_bench/, tests/, declare.py hold no
+BUILD file, so their files are this package's)."""
+
+load("//bazel:defs.bzl", "bench_python", "research_python", "tree_part", "tree_test")
+
+exports_files([
+    "requirements.lock",
+    "research.lock",
+])
+
+#: this package's part of the tree, and the whole tree
+tree_part()
+
+filegroup(
+    name = "tree",
+    srcs = [
+        ":tracked",
+        "//bazel:tracked",
+    ],
+)
+
+#: rola's rule set, over the bench package and its tests
+tree_test(
+    name = "ruff",
+    size = "small",
+    cmd = ["ruff", "check", "--select", "E,F,UP,B,SIM,I,C4", "--line-length", "127", "--target-version", "py310",
+           "rola_bench", "tests", "declare.py"],
+    data = [":tree"],
+)
+
+tree_test(
+    name = "ruff_e3",
+    size = "small",
+    #: ruff's blank-line family is preview-gated, so its own invocation
+    cmd = ["ruff", "check", "--preview", "--select", "E3", "--line-length", "127", "--target-version", "py310",
+           "rola_bench", "tests", "declare.py"],
+    data = [":tree"],
+)
+
+#: the measurement composer's contract: the suite composes each rola checkout's declarations as declared
+tree_test(
+    name = "suite_contract",
+    size = "small",
+    cmd = ["python3", "-m", "unittest", "tests.measure.test_suite"],
+    data = [":tree"],
+)
+
+tree_test(
+    name = "mirror_declarations",
+    size = "small",
+    cmd = ["python3", "-m", "rola_devtools.mirror", "--check"],
+    data = [":tree"],
+    git = True,
+)
+
+#: THE GATE: every check this workspace holds; the commit hook runs it (.githooks/pre-commit)
+test_suite(
+    name = "gate",
+    tests = [
+        ":mirror_declarations",
+        ":ruff",
+        ":ruff_e3",
+        ":suite_contract",
+    ],
+)
+
+#: THE RUNS (README.md#local-runs): each environment's interpreter, and the documented commands. A run that imports rola
+#: takes the rola checkout as its first argument, its library built (`bazel run //:mqar_smoke -- <rola checkout>`).
+bench_python(name = "bench_python")
+
+research_python(name = "research_python")
+
+bench_python(
+    name = "mqar_smoke",
+    module = "rola_bench.mqar.smoke",
+    rola = True,
+)
+
+bench_python(
+    name = "mqar_local_grid",
+    module = "rola_bench.mqar.local_grid",
+    rola = True,
+)
+
+#: the tests, per area (README.md#tests-and-the-gate): the model and MQAR suites import rola
+bench_python(
+    name = "pytest",
+    module = "pytest",
+    rola = True,
+)
+
+#: the fleet launcher: the jobs it builds name rola's objects
+bench_python(
+    name = "fleet",
+    module = "rola_bench.fleet",
+    rola = True,
+)
+
+#: the measurement suite, a declared build over rola-devtools' build system (declare.py)
+bench_python(
+    name = "suite",
+    module = "rola_devtools.build",
+)

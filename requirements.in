@@ -1,0 +1,26 @@
+# rola-bench's graph environment (MODULE.bazel's `environment.python` tag `bench_env`): the fork's stack, on rola's
+# torch (the cu13 toolchain's build), which rola-bench's gate, its tests and its local runs import. The packages that
+# are not on an index -- the fla fork, the zoology fork, fleet, rola-results -- are pinned by their public commits
+# beside the lock (the tag's `packages`), so this lock carries their dependencies. Versions are the ones the hand-made
+# venv (rola311-cu13) was proven with. Compiled with `uv pip compile requirements.in --python-version 3.11
+# --generate-hashes --extra-index-url https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match
+# -o requirements.lock`.
+torch==2.14.0+cu130
+numpy==2.4.6
+pyyaml==6.0.3
+pytest==9.1.1
+ruff==0.14.10
+# the fla fork's
+transformers==4.57.6
+einops==0.8.2
+# zoology's
+pydantic==2.13.5
+tqdm==4.70.1
+opt-einsum==3.4.0
+wandb==0.30.0
+# the analyses'
+pandas==3.0.3
+matplotlib==3.11.1
+# the build backend the pinned packages build with, against this environment (`isolated_builds = False`)
+setuptools==84.2.1
+wheel==0.48.0

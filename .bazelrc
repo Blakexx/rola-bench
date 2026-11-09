@@ -1,0 +1,11 @@
+# rola-bench's graph settings: nothing here names a machine -- the machine's own settings (the shared disk and
+# repository caches) come from the dev config, through the front door (bazel/bazel, rola_devtools.graph.front_door).
+
+# the server exits after 15 idle minutes, above the disk cache collector's 5-minute idle delay
+startup --max_idle_secs=900
+
+# no output links in the checkout
+build --experimental_convenience_symlinks=clean
+
+# the shared disk cache's bound
+common --experimental_disk_cache_gc_max_size=5G

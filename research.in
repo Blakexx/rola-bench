@@ -1,0 +1,23 @@
+# rola-bench's research environment (MODULE.bazel's `environment.python` tag `research_env`): the baselines' stack --
+# torch 2.6's CUDA 12.4 build, flash-attn's prebuilt wheel for it (by URL: the release's binary, never a source
+# build), upstream flash-linear-attention 0.4.2 -- with zoology and fleet pinned by their public commits beside the
+# lock. Versions are the ones the hand-made venv (rola311) was proven with. Compiled with `uv pip compile research.in
+# --python-version 3.11 --generate-hashes --extra-index-url https://download.pytorch.org/whl/cu124
+# --index-strategy unsafe-best-match -o research.lock`.
+torch==2.6.0+cu124
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1%2Bcu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
+flash-linear-attention==0.4.2
+fla-core==0.4.2
+transformers==4.45.2
+einops==0.8.2
+numpy==2.4.6
+pyyaml==6.0.3
+pydantic==2.13.4
+tqdm==4.68.3
+opt-einsum==3.4.0
+wandb==0.28.0
+datasets==5.0.0
+pandas==3.0.3
+# the build backend the pinned packages build with, against this environment (`isolated_builds = False`)
+setuptools==84.2.1
+wheel==0.48.0

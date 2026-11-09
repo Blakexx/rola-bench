@@ -1,13 +1,13 @@
 """ROLA-BENCH'S ROOT: rola checkouts and the libraries they are compared against, measured as one declared build.
 
-    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --only 'session/attention/*'
-    python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \\
+    bazel run //:suite -- plan declare.py:suite --arg target=worktree:PATH --only 'session/L1024*'
+    bazel run //:suite -- run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \\
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \\
         [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]...
-    python -m rola_devtools.build run  declare.py:diffs --arg target=... --arg references=...   # the dual run
+    bazel run //:suite -- run  declare.py:diffs --arg target=... --arg references=...   # the dual run
         [--arg record=oracle]      # an intended change to a surface: its verdict recorded, not a build failure
 
-Run it with a python that has rola-devtools and rola-results (the target's venv does). A TARGET is a rola checkout and
+`//:suite` runs rola-devtools' build system on the bench environment, in this checkout. A TARGET is a rola checkout and
 the venv that runs it; `references` adds others, `;`-separated. Each checkout's own `declare.py` is loaded by path and
 called under its label's scope with one shared timing server: its build, machine facts, timing registrations and its
 diff SIDES, and for the target alone its instruments and its own kernel-vs-oracle diff. THE ROOT DECLARES EVERYTHING

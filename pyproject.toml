@@ -10,8 +10,9 @@ description = "RoLA's benchmarks on fleet (MQAR) and the local measurement suite
 requires-python = ">=3.10"
 # The dependency edges: the benches build RoLA through fla (our fork's RoLA layer wraps rola), MQAR's model and
 # baselines come from zoology, dispatch from fleet, and every result is stored through rola-results. First-party
-# packages are installed from their own repositories (editable locally, from source in an image); they are listed so
-# pip verifies they are present.
+# packages come from their own repositories (locally the graph's environments pin them by public commit and a run names
+# its rola checkout, README.md#local-runs; an image installs them from source); they are listed so pip verifies they
+# are present.
 dependencies = [
     "rola",          # the model and kernels
     "flash-linear-attention",  # fla, from the fork's rola branch: RoLA's layer and HF model, and the baseline layers

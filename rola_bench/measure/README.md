@@ -6,17 +6,18 @@ its sessions are its timing system's (`rola_devtools.timing`), and every input i
 `declare.py` by path, composes them with this package's attention reference and groups, and declares the sessions, the
 memory pass and the stores. This package defines no measurement of rola's.
 
-    python -m rola_devtools.build plan declare.py:suite --arg target=worktree:PATH --only 'session/L1024*'
-    python -m rola_devtools.build run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \
+    bazel run //:suite -- plan declare.py:suite --arg target=worktree:PATH --only 'session/L1024*'
+    bazel run //:suite -- run  declare.py:suite --arg target=worktree:PATH[,venv:PATH][,label:NAME] \
         [--arg references='worktree:PATH,label:master;worktree:PATH'] [--arg rounds=8] [--arg reps=11] \
         [--arg warmup=10] [--arg store_root=DIR] [--only GLOB]... [--skip GLOB]... [--force]
-    python -m rola_devtools.build run  declare.py:diffs --arg target=... --arg references=...   # the dual run
+    bazel run //:suite -- run  declare.py:diffs --arg target=... --arg references=...   # the dual run
 
 THE ROOT DECLARES EVERYTHING and takes no selector: which of it a build runs is pruned by LABEL at the CLI, which
 knows nothing of cells, groups or parts -- `--only 'tip/phases'` runs that instrument and what it needs;
 `--skip '*/timeline'` drops that instrument and everything that reads it; `--only 'session/*'` runs every session.
 
-Run it from this repository with a python that has rola-devtools and rola-results (a rola checkout's venv does).
+`//:suite` runs the build system on the bench environment, in this checkout; each rola checkout runs in its own venv
+(`venv:PATH`, by default the `venv-<checkout>` rola's `bazel run //:dev_env` writes beside it).
 
 ## Checkouts
 
@@ -65,6 +66,6 @@ ratio is chosen when the records are read, within a session.
 
 ## Tests
 
-`python -m unittest tests.measure.test_suite` checks the groups against the central cells and the root's declarations
+`bazel test //:suite_contract` (`python -m unittest tests.measure.test_suite`, in the gate) checks the groups against the central cells and the root's declarations
 on fake checkouts, with no GPU; rola-devtools' `tests/test_declared_build.py` and `tests/test_timing.py` check the build
 and timing systems.

@@ -1,0 +1,7 @@
+"""rola-bench's graph machinery: its wrappers of rola-devtools' rules (defs.bzl) and its front door stub."""
+
+load(":defs.bzl", "tree_part")
+
+exports_files(["defs.bzl"])
+
+tree_part()
