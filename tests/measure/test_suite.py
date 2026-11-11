@@ -1,7 +1,7 @@
 """The suite's root (`declare.py`) and groups: every group holds its claim against the central cells and a group breaking
 it is refused; the root loads each checkout's own declarations, gives the target alone its instruments, and declares one
 session per group and arm set over every checkout's registration on the group's cells beside the attention reference,
-one memory pass, a null gate on the target's carry arm, a store for each result and a server stop that runs after
+one memory pass, a null gate on the target's facts pass, a store for each result and a server stop that runs after
 everything; a checkout without declarations is not compared. No GPU: nothing is built.
 `python -m unittest tests.measure.test_suite`"""
 from __future__ import annotations
@@ -21,7 +21,7 @@ GROUPS = load(ROOT / "rola_bench" / "measure" / "groups.py")
 SUITE = load(ROOT / "declare.py")
 
 #: a checkout's declarations as rola's `declare.py` shapes them: a build, its instruments, and on the carry cells a
-#: `carry_forward` registration and a clock reader
+#: `prefill` registration, the `facts_pass` one the root's null gate takes, and a clock reader
 FAKE = textwrap.dedent('''
     from rola_devtools.build.declare import Env
     from rola_devtools.cells.declare import cells as cell_nodes
@@ -49,9 +49,9 @@ FAKE = textwrap.dedent('''
                "diffs": {}}
         if timing is None:
             return out
-        out["entries"]["carry_forward"] = register_timing(g, "carry_forward", server=timing, env=env,
-                                                          executor="fake:timed", cells=cell_nodes(g, carry),
-                                                          deps={"binary": binary})
+        for arm in ("prefill", "facts_pass"):
+            out["entries"][arm] = register_timing(g, arm, server=timing, env=env, executor="fake:timed",
+                                                  cells=cell_nodes(g, carry), deps={"binary": binary})
         out["clock"] = register_clock_reader(g, "clock", server=timing, env=env, executor="fake:clock")
         return out
 ''')
@@ -97,9 +97,9 @@ class Root(unittest.TestCase):
     def test_a_group_is_one_session_per_arm_set_over_every_checkouts_registration_and_the_reference(self):
         public, targets = self.root(references=f"worktree:{self.base / 'base'},label:master")
         flagship = GROUPS["GROUPS"]["L1024-N65536-dv64"]
-        session = targets["session/L1024-N65536-dv64/carry_forward+flash"]
+        session = targets["session/L1024-N65536-dv64/prefill+flash"]
         members = {d.label for role, d in session.deps.items() if role.startswith("r")}
-        self.assertEqual(members, {"tip/carry_forward", "master/carry_forward", "bench/flash"})
+        self.assertEqual(members, {"tip/prefill", "master/prefill", "bench/flash"})
         self.assertEqual(session.params["cells"], list(flagship.cells))
         self.assertEqual(session.deps["clock"].label, "tip/clock")
         self.assertEqual(session.holds, {"gpu": "all", "clock": 1})
@@ -109,10 +109,10 @@ class Root(unittest.TestCase):
         self.assertEqual({k: stored[k] for k in ("tip/store/phases", "store/memory")},
                          {"tip/store/phases": "tip/phases", "store/memory": "memory"})
         gate = targets["null"]
-        #: the null gate takes the FIRST carry cell of every group the target's carry_forward registers on: one
+        #: the null gate takes the FIRST carry cell of every group the target's facts_pass registers on: one
         #: cell a group, so a worker's bias is read once per group's shape and never per cell
         with_carry = [g for g in GROUPS["GROUPS"].values() if any(not c.startswith(("qkv-", "layer-")) for c in g.cells)]
-        self.assertEqual(gate.deps["r0"].label, "tip/carry_forward")
+        self.assertEqual(gate.deps["r0"].label, "tip/facts_pass")
         self.assertEqual(gate.params["cells"], [next(c for c in g.cells if not c.startswith(("qkv-", "layer-")))
                                                 for g in with_carry])
         stop = targets["timing-server-stop"]
@@ -130,11 +130,11 @@ class Root(unittest.TestCase):
                          & set(inspect.signature(SUITE["root"]).parameters))
         public, targets = self.root()
         #: a session per group arm set that has a member -- every group, not a gate subset; the double registers
-        #: only `carry_forward`, rola-bench `flash` and each group's own attention arms (the incremental cell's), so
+        #: only `prefill`, rola-bench `flash` and each group's own attention arms (the incremental cell's), so
         #: the arm sets naming other arms declare nothing
         sessions = {label for label in targets if label.startswith("session/")}
         expected = {f"session/{g.name}/{'+'.join(arms)}" for g in GROUPS["GROUPS"].values() for arms in g.together
-                    if set(arms) & ({"carry_forward", "flash"} | {a for a, _ in g.flash_arms})}
+                    if set(arms) & ({"prefill", "flash"} | {a for a, _ in g.flash_arms})}
         self.assertEqual(sessions, expected)
         only = select([public["suite"]], only=["tip/phases"])
         self.assertEqual([t.label for t in only], ["tip/binary", "tip/phases"])

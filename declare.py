@@ -23,7 +23,7 @@ rule the target states for that surface -- the oracle pair's dual run and kernel
 `diff/<surface>`. For each group (`rola_bench/measure/groups.py`) and each arm set it times together, one SESSION
 (`measure_timing`) over every checkout's registration of those arms on the group's cells, the target's clock reader
 proving the clock; one MEMORY pass over every registration on every selected cell; a NULL GATE over the target's
-`carry_forward` on each group's first RoLA cell, its entries timed against copies of themselves in second workers, so a
+`facts_pass` on each group's first RoLA cell, its entries timed against copies of themselves in second workers, so a
 comparison across checkouts' workers is read beside what the gate found; a store for each instrument
 (`rola/<instrument>`), each session (`timing/session`), the memory pass (`timing/memory`) and the null gate
 (`timing/null`); and the server's stop, which runs whatever failed. Which checkout is the reference for a ratio is
@@ -133,7 +133,7 @@ def root(g, target: str, references: str = "", rounds: str = "8", reps: str = "1
         for name, verdict in out["diffs"].items():
             stores.append(store(g, f"{c['label']}/store/{name}", source=verdict, location=f"rola/{name}", root=root_dir))
         clock = clock or out["clock"]
-        null_entry = null_entry or out["entries"].get("carry_forward")
+        null_entry = null_entry or out["entries"].get("facts_pass")
 
     #: THE CROSS-CHECKOUT DIFFS: each surface the target exposes, against the same surface in each reference, under
     #: THIS ROOT'S rule for it (`RULES`) -- the suite owns how checkouts are compared, as it owns how they are timed

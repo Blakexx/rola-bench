@@ -24,8 +24,8 @@ knows nothing of cells, groups or parts -- `--only 'tip/phases'` runs that instr
 A checkout is a rola worktree and the venv that runs it (`venv-<name>` beside it unless `venv:` names one); its label
 scopes its targets (`tip/binary`) and defaults to its directory's name. The `target` is the first checkout, the
 `references` the others. Each checkout's `declare.py` declares, in that checkout's venv and directory: its build
-(cached while its binary stands), its machine facts, its timing registrations on every central cell of each kind (`carry_forward` and
-`carry_intra` on carry cells, `entmax_solve@layer=C` and `decode_step@layer=C` on layer cells under each construction)
+(cached while its binary stands), its machine facts, its timing registrations on every central cell of each kind (`prefill` and
+`facts_pass` on carry cells, `entmax_solve@layer=C` and `decode_step@layer=C` on layer cells under each construction)
 its clock reader and its DIFF SIDES (`SURFACES`: the fp64 oracle, the producer reference, the carry kernel, each over
 the cells of its kind and tier); the target alone also declares its instruments (`sass`, `registers`, and per carry cell
 `phases`, `counters`, `census`, `timeline`, `roofline`) and its own kernel-vs-oracle diff. For each surface and each
@@ -51,7 +51,7 @@ with the target's clock reader proving the clock before and after, an untimed re
 cannot run on a cell (a binary without the arm, a setup that does not fit) is recorded as that member's failure and the
 session goes on; a session that cannot run at all fails the build, and the server's stop still runs. One MEMORY pass
 (`measure_memory`) takes each entry on each cell alone. One NULL GATE (`measure_null_gate`) times the target's
-`carry_forward` on each group's first RoLA cell against copies of itself in second workers: where the per-rep ratios put
+`facts_pass` on each group's first RoLA cell against copies of itself in second workers: where the per-rep ratios put
 one outside their interquartile range, a worker's bias is found, and a ratio across checkouts' workers is read beside it.
 
 ## Records

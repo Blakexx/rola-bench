@@ -11,9 +11,9 @@ registry. The root (`declare.py`) loads this file by path.
                                                 heads every cell draws a call
     layer(construction, cell)                   a layer input under one of RoLA's constructions; its solve and its
                                                 decode step each timed alone
-    layer_prefill(construction, cell, ...)      THE LAYER-LEVEL PREFILL: RoLA's stateless prefill (the producer and
-                                                the op) beside FlashAttention with its QKV projection, one session; the
-                                                producer's launch in its own
+    layer_prefill(construction, cell, ...)      THE LAYER-LEVEL PREFILL: RoLA's stateless prefill beside
+                                                FlashAttention with its QKV projection, one session; each of the op's
+                                                stages (`LAYER_STAGES`) in its own
     incremental(chunk, dv, contexts, ...)       THE INCREMENTAL CELL (ruled 2026-10-18): c = `chunk` new tokens after
                                                 each context T, FlashAttention over the T + c KV cache (with `hidden`,
                                                 its QKV projection for `heads` heads too), every context in one session;
@@ -45,7 +45,7 @@ class Group:
 
 #: RoLA's arms an attention group times, EACH IN ITS OWN SESSION beside `flash`: a session holds every member set up at
 #: once, so one RoLA arm a session bounds the device memory a group needs
-ATTENTION_ARMS = ("carry_forward", "carry_intra", "intra_forward", "scale_pass", "prefill")
+ATTENTION_ARMS = ("prefill",)
 
 
 def attention(tokens: int, states: int, dv: int, rola_cells: tuple[str, ...], heads: int = 1) -> Group:
@@ -76,20 +76,20 @@ def layer(construction: str, cell: str) -> Group:
 
 
 #: the op's stages a layer-prefill group times on the layer's own bundle, EACH IN ITS OWN SESSION (one RoLA arm a session
-#: bounds the device memory, as `ATTENTION_ARMS`): together with `produce` they split the layer's time by launch
-LAYER_STAGES = ("layer_facts", "layer_scale", "layer_carry", "layer_intra", "layer_op")
+#: bounds the device memory, as `ATTENTION_ARMS`): they split the layer's time by launch
+LAYER_STAGES = ("layer_facts", "layer_op")
 
 
 def layer_prefill(construction: str, cell: str, tokens: int, dv: int, hidden: int, heads: int) -> Group:
     flash = f"flash@T=0,h={hidden}x{heads}"
     suffix = "" if heads == 1 else f"-h{heads}"
     return Group(f"layer-prefill-{construction}",
-                 f"the layer input {cell} under RoLA's construction {construction}: its stateless prefill (the "
-                 f"producer and the op) beside FlashAttention with its QKV projection from hidden {hidden} for "
-                 f"{heads} heads, the output projection outside both; the producer's launch alone, and each of the "
+                 f"the layer input {cell} under RoLA's construction {construction}: its stateless prefill "
+                 f"beside FlashAttention with its QKV projection from hidden {hidden} for "
+                 f"{heads} heads, the output projection outside both; each of the "
                  f"op's stages alone on the layer's own bundle",
                  ("tokens", "dv"), (cell, f"qkv-L{tokens}-dv{dv}{suffix}"),
-                 ((f"produce@layer={construction}",), (f"layer_prefill@layer={construction}", flash),
+                 ((f"layer_prefill@layer={construction}", flash),
                   *((f"{stage}@layer={construction}",) for stage in LAYER_STAGES)), None,
                  ((flash, {"hidden": hidden, "heads": heads}),))
 
